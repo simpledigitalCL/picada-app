@@ -225,21 +225,35 @@ Formulario multi-step para crear:
 
 ### Tablas principales
 
+Tablas en `supabase/schema.sql` (schema base idempotente):
+
 | Tabla | Descripción |
 |---|---|
-| `profiles` | Perfil de usuario (username, bio, avatar, XP, nivel) |
-| `user_preferences` | Preferencias gastronómicas (likes, restricciones, experiencias) |
+| `profiles` | Perfil de usuario (username, bio, avatar, points, level) |
+| `user_preferences` | Preferencias gastronómicas (likes, restricciones, experiencias, ubicación) |
 | `user_visits` | Historial de visitas a locales |
-| `user_favorites` | Colecciones guardadas |
+| `user_favorites` | Colecciones guardadas (favoritos de contenido externo) |
 | `user_reviews` | Reseñas escritas por usuario |
-| `places` | Catálogo global de locales (enriquecido desde Google/OSM/usuarios) |
-| `posts` | Publicaciones (reseñas, fotos, videos) |
-| `place_tags` | Tags asociados a locales (auto-tags + manuales) |
-| `user_tag_affinity` | Afinidad usuario-tag para personalización |
-| `achievements` | Definición de logros disponibles |
-| `user_achievements` | Logros desbloqueados por usuario |
-| `gamification_events` | Eventos de XP server-side |
-| `tag_catalog` | Catálogo normalizado de tags gastronómicos |
+| `places` | Catálogo global de locales (enriquecido desde Google/OSM/usuarios, con flags dietéticos y `picada_score`) |
+| `posts` | Publicaciones del feed (review, photo, video, incognito, tip) |
+| `post_media` | Archivos de media asociados a un post (foto/video) |
+| `menu_items` | Platos con datos nutricionales (fuente: community, official o ai) |
+| `user_points` | Registro de puntos otorgados por acción (fuente de verdad de XP) |
+| `follows` | Relaciones de seguimiento entre usuarios |
+| `saved_items` | Ítems de menú guardados por usuario (pending / favorite) |
+| `place_change_log` | Auditoría de cambios en locales |
+
+Tablas adicionales creadas por **migraciones** (en `supabase/migrations/`):
+
+| Tabla | Migración | Descripción |
+|---|---|---|
+| `tag_catalog` | `20260430_tag_catalog_service.sql` | Catálogo normalizado de tags gastronómicos |
+| `user_tag_affinity` | `20260430_user_tag_affinity.sql` | Score de afinidad usuario↔tag |
+| `achievements` / `user_achievements` | `20260429_gamification_server_rewards.sql` | Logros y desbloqueos |
+| `gamification_events` | `20260429_gamification_server_rewards.sql` | Eventos de XP server-side |
+| `place_tags` / `tag_relations_stats` | `20260428_tag_relations_stats.sql` | Tags por local y estadísticas de relación |
+
+> **Importante:** El schema base + todas las migraciones deben ejecutarse en orden para tener la DB completa.
 
 ### Extensiones PostgreSQL requeridas
 
@@ -293,34 +307,53 @@ Sistema completo de gamificación orientado a aumentar el engagement:
 
 ### XP y Niveles
 
-| Nivel | Nombre | XP requerido |
-|---|---|---|
-| 1 | Explorador | 0 |
-| 2 | Picador | 500 |
-| 3 | Crítico | 2000 |
-| 4 | Leyenda | 5000 |
+Definidos en `lib/gamification.ts` (fuente de verdad del frontend):
+
+| Nivel | Nombre | Rango de puntos | Emoji |
+|---|---|---|---|
+| 1 | Explorador | 0 – 399 | 🧭 |
+| 2 | Crítico | 400 – 1.499 | 🍽️ |
+| 3 | Inspector | 1.500 – 4.999 | 🔍 |
+| 4 | Rey Picada | 5.000 – 9.999 | 👑 |
+
+> **Nota:** El schema SQL legacy tiene comentarios que mencionan "Picador/Leyenda" — esos nombres están desactualizados. El código TypeScript (`lib/gamification.ts:125-130`) es la fuente de verdad.
 
 ### Acciones que dan XP
 
-- Escribir reseña: +50 XP
-- Subir foto: +20 XP
-- Subir video: +30 XP
-- Primer voto en un local: +100 XP (bonificación "primer descubridor")
-- Check-in en local: +10 XP
-- Like recibido: +5 XP
-- Racha diaria mantenida: +25 XP/día
+El XP es **server-driven**: se otorga mediante triggers en la base de datos y se acumula en `profiles.points` vía la tabla `user_points`. Los valores exactos según el schema:
+
+| Acción | Puntos | Descripción |
+|---|---|---|
+| `create_picada` | +15 | Crear un local nuevo |
+| `first_photo` | +10 | Primera foto de un borrador de local |
+| `post_review` | +5 | Reseña con texto ≥ 10 caracteres |
+| `post_media` | +8 | Subir foto o video |
+| `complete_draft` | +10 | Completar datos faltantes de un local |
+| `first_visit` | +3 | Registrar visita a un local |
+
+El cliente (`lib/gamification-events.ts`) usa fallbacks mientras espera confirmación del server: `CONTENT_CREATED/USER_REVIEWED` → 10pts, `USER_VOTED` → 2pts, `USER_SAVED` → 3pts, `USER_SCANNED` → 10pts.
 
 ### Streaks
 
 Se trackea la racha de días consecutivos activos. Si no hay actividad en 24h se muestra un banner de advertencia ("Tu racha está en riesgo").
 
-### Logros (Achievements)
+### Logros (Achievements) y Badges
 
-Motor de logros en `lib/achievement-engine.ts`. Ejemplos:
-- "Primero en descubrir" — primer voto en un local
-- "Midnight snack" — abrir la app entre las 00:00 y 04:00
-- "Explorador de zona" — visitar 5 comunas distintas
-- "Crítico de élite" — 50 reseñas escritas
+Motor de logros en `lib/achievement-engine.ts`. Los desafíos se cargan dinámicamente desde `public/config/challenges.json`.
+
+Badges definidos en `lib/gamification.ts`:
+
+| Badge ID | Nombre | Condición |
+|---|---|---|
+| `primer_plato` | Primer Plato 🍕 | Subiste tu primera foto |
+| `explorador_10` | Explorador 🗺️ | Visitaste 10 locales distintos |
+| `critico_elite` | Crítico de Élite ⭐ | Escribiste 50 reseñas |
+| `racha_caliente` | Racha Caliente 🔥 | 7 días consecutivos activo |
+| `espia_gourmet` | Espía Gourmet 🤫 | 5 reviews en modo incógnito |
+| `foto_viral` | Foto Viral 📸 | Una foto recibió 10 votos útiles |
+| `mood_master` | Mood Master 🎭 | Usaste todos los moods disponibles |
+| `picada_rey` | Rey Picada 👑 | Alcanzaste 5.000 puntos |
+| `descubridor` | Descubridor 🌟 | Fuiste el primero en votar 3 locales |
 
 Los logros se notifican con un toast animado (`components/gamification/AchievementToast`).
 
@@ -331,8 +364,11 @@ Los logros se notifican con un toast animado (`components/gamification/Achieveme
 ### Scanner de platos (`/api/scanner`)
 
 - Recibe imagen base64 desde la cámara
-- Llama a **Claude (Anthropic)** con vision
-- Retorna: nombre del plato, descripción, estimación nutricional (kcal, proteínas, carbos, grasas), tags gastronómicos sugeridos
+- Llama a **Google Gemini 1.5 Flash** (`@google/generative-ai`) con vision
+- API key requerida: `GEMINI_API_KEY` (o `GOOGLE_API_KEY` como fallback) — **distinta** de `ANTHROPIC_API_KEY`
+- Retorna: nombre del plato, calorías estimadas, proteínas/carbos/grasas, apto vegetariano/vegano/sin gluten/sin lactosa, score viral, etiquetas detectadas
+- El resultado se marca como `draft_only: true` — es una sugerencia, no se publica automáticamente
+- Prompt calibrado para gastronomía chilena (distingue chorrillana, completo, paila marina, cazuela, etc.)
 
 ### Auto-tagging de locales (`lib/place-auto-tagging.ts`)
 
@@ -348,6 +384,8 @@ Los logros se notifican con un toast animado (`components/gamification/Achieveme
 ### Match Score (`lib/place-match.ts`)
 
 Score numérico 0-100 que indica qué tan bien encaja un local con el perfil del usuario. Se muestra en las cards del feed.
+
+> **Nota sobre IA:** El scanner de platos (`/api/scanner`) usa **Google Gemini 1.5 Flash** (`@google/generative-ai`), no Claude. Requiere `GEMINI_API_KEY` o `GOOGLE_API_KEY`. El auto-tagging de locales (`lib/place-auto-tagging.ts`) **no usa ningún LLM** — funciona con el sistema de puntuación y mapeo de categorías descrito en la sección de Tags.
 
 ---
 
@@ -413,8 +451,9 @@ cp .env.example .env.local
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Sí | Anon key (pública, va al browser) |
 | `SUPABASE_URL` | Sí | URL del proyecto Supabase (server-side) |
 | `SUPABASE_SERVICE_ROLE_KEY` | Sí | Service role key (privada, NUNCA exponer) |
-| `GOOGLE_MAPS_API_KEY` | Sí | API key de Google Maps Platform |
-| `ANTHROPIC_API_KEY` | Sí | API key de Anthropic (Claude) |
+| `GOOGLE_MAPS_API_KEY` | Sí | API key de Google Maps Platform (geocoding y Places) |
+| `GEMINI_API_KEY` | Sí | API key de Google Gemini (scanner de platos con visión IA) |
+| `ANTHROPIC_API_KEY` | No | API key de Anthropic Claude (módulo de inferencia — `lib/inference/`, uso futuro) |
 
 ### Google Maps — APIs requeridas
 
@@ -662,22 +701,32 @@ Antes del login, el usuario tiene una identidad anónima (`lib/identity.ts`) alm
 ```
 auth.users
     │
-    ├── profiles (1:1)
-    ├── user_preferences (1:1)
-    ├── user_visits (1:N)
-    ├── user_favorites (1:N)
-    ├── user_reviews (1:N)
-    ├── user_achievements (1:N)
-    └── user_tag_affinity (1:N)
+    ├── profiles (1:1)           ← points, level, avatar
+    ├── user_preferences (1:1)   ← likes, restricciones, dieta, ubicación
+    ├── user_visits (1:N)        ← historial de visitas
+    ├── user_favorites (1:N)     ← colecciones guardadas
+    ├── user_reviews (1:N)       ← reseñas con rating y mood_tags
+    ├── user_points (1:N)        ← log de XP otorgado por acción (server-side)
+    ├── follows (N:N)            ← relaciones de seguimiento
+    ├── saved_items (1:N)        ← ítems de menú guardados
+    ├── user_achievements (1:N)  ← [migración] logros desbloqueados
+    └── user_tag_affinity (1:N)  ← [migración] score afinidad usuario↔tag
 
 places
-    ├── posts (N:1)
-    ├── place_tags (N:1)
+    ├── posts (N:1)              ← contenido del feed vinculado al local
+    ├── menu_items (N:1)         ← platos con datos nutricionales
+    ├── place_change_log (1:N)   ← auditoría de cambios
+    ├── place_tags (N:1)         ← [migración] tags asociados al local
     └── user_reviews → places (N:1)
 
-tag_catalog
+posts
+    └── post_media (1:N)         ← archivos de foto/video del post
+
+tag_catalog                      ← [migración] catálogo normalizado de tags
     ├── place_tags (N:1)
     └── user_tag_affinity (N:1)
+
+[migración] = creado por supabase/migrations/, no en schema.sql base
 ```
 
 ---
