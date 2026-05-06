@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { inferTagCatalogFields } from '@/lib/tag-normalization'
+import { inferTagCatalogFields } from '@/lib/tags/normalization'
 
 /**
  * Registra etiquetas nuevas como pending si no existen en `tag_catalog`.

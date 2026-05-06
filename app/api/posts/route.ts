@@ -1,11 +1,11 @@
 import { after, NextResponse } from 'next/server'
 import { getSupabaseServerClient } from '@/lib/supabase-server'
-import type { UnifiedContentPayload } from '@/lib/content-model'
+import type { UnifiedContentPayload } from '@/lib/content/model'
 import { persistUnifiedContent } from '@/lib/server/content-persistence'
 import { consumeRateLimit, getClientIp } from '@/lib/server/rate-limit'
 import { requireAuthenticatedUser } from '@/lib/server/auth'
 import { logApiEvent } from '@/lib/server/observability'
-import { sanitizeUserText } from '@/lib/sanitize'
+import { sanitizeUserText } from '@/lib/utils/sanitize'
 
 export async function POST(req: Request) {
   const ip = getClientIp(req)

@@ -1,5 +1,5 @@
 import { getSupabaseServerClient } from '@/lib/supabase-server'
-import type { PlaceTaggingMeta } from '@/lib/place-tagging-types'
+import type { PlaceTaggingMeta } from '@/lib/tags/types'
 
 export type AffinityEventType = 'view' | 'save' | 'review'
 

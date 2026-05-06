@@ -1,6 +1,6 @@
 'use client'
 
-import type { PlaceSuggestion } from '@/components/place-selector'
+import type { PlaceSuggestion } from '@/components/search/place-selector'
 import { LocationSelector } from '@/components/post-form/LocationSelector'
 
 type Props = {

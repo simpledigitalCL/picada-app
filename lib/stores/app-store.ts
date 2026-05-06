@@ -1,8 +1,8 @@
 'use client'
 
 import { create } from 'zustand'
-import { getCurrentLocation, subscribeToLocationChanges } from '@/lib/location'
-import { getUserInteraction, subscribeToSocialChanges, toggleVisitLater, votePicada } from '@/lib/social'
+import { getCurrentLocation, subscribeToLocationChanges } from '@/lib/location/core'
+import { getUserInteraction, subscribeToSocialChanges, toggleVisitLater, votePicada } from '@/lib/social/interactions'
 
 type InteractionState = {
   votedPicada: boolean

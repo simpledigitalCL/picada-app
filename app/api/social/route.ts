@@ -3,7 +3,7 @@ import { getSupabaseServerClient } from '@/lib/supabase-server'
 import { consumeRateLimit, getClientIp } from '@/lib/server/rate-limit'
 import { requireAuthenticatedUser } from '@/lib/server/auth'
 import { logApiEvent } from '@/lib/server/observability'
-import { sanitizeUserText } from '@/lib/sanitize'
+import { sanitizeUserText } from '@/lib/utils/sanitize'
 
 function isSafeId(v: string, min = 3, max = 64): boolean {
   return new RegExp(`^[a-zA-Z0-9._:-]{${min},${max}}$`).test(v)

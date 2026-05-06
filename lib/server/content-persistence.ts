@@ -1,10 +1,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { UnifiedContentPayload } from '@/lib/content-model'
-import { computeContentValue, validateContentPayload } from '@/lib/content-pipeline'
-import { buildMergedPlaceClassification } from '@/lib/merge-automated-place-tags'
-import type { PlaceTaggingMeta } from '@/lib/place-tagging-types'
+import type { UnifiedContentPayload } from '@/lib/content/model'
+import { computeContentValue, validateContentPayload } from '@/lib/content/pipeline'
+import { buildMergedPlaceClassification } from '@/lib/tags/merge-automated'
+import type { PlaceTaggingMeta } from '@/lib/tags/types'
 import { ingestTagRelationStats } from '@/lib/server/tag-relations'
-import { sanitizeUserText } from '@/lib/sanitize'
+import { sanitizeUserText } from '@/lib/utils/sanitize'
 
 function normalizeUuid(input?: string | null): string | null {
   const value = String(input || '').trim()

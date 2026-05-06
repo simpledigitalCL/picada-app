@@ -1,6 +1,6 @@
 import { getSupabaseServerClient } from '@/lib/supabase-server'
-import { coerceFormTagSlug } from '@/lib/tag-slug'
-import { PLACE_AUTOMATED_SEED_VERSION, type PlaceTaggingMeta } from '@/lib/place-tagging-types'
+import { coerceFormTagSlug } from '@/lib/tags/slug'
+import { PLACE_AUTOMATED_SEED_VERSION, type PlaceTaggingMeta } from '@/lib/tags/types'
 import { repairMissingGeoInPlaces } from '@/lib/utils/geo-repair'
 
 type InferenceAuditItem = {

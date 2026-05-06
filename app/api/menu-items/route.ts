@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getSupabaseServerClient } from '@/lib/supabase-server'
-import { menuItemToUnifiedPayload } from '@/lib/menu-items-proxy'
+import { menuItemToUnifiedPayload } from '@/lib/places/menu-items'
 
 export async function GET(req: Request) {
   const supabase = getSupabaseServerClient()
