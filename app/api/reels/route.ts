@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import type { ReelItem } from '@/lib/reels-types'
+import type { ReelItem } from '@/lib/feed/types'
 
 const RECIPE_BLOCKLIST = [
   'receta',

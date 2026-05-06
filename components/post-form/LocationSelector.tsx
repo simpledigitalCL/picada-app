@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Search, MapPin, Star, Zap } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { getSupabaseBrowserClient } from '@/lib/supabase'
-import type { PlaceSuggestion } from '@/components/place-selector'
+import type { PlaceSuggestion } from '@/components/search/place-selector'
 
 type DiscoverItem = {
   id: string

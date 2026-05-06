@@ -33,7 +33,14 @@
       "Bash(curl -s http://localhost:3002/ -o /dev/null -w \"%{http_code}\")",
       "Bash(node -e ' *)",
       "Bash(taskkill /F /PID 12464)",
-      "PowerShell(Stop-Process -Id 12464 -Force -ErrorAction SilentlyContinue)"
+      "PowerShell(Stop-Process -Id 12464 -Force -ErrorAction SilentlyContinue)",
+      "mcp__linear-server__list_teams",
+      "mcp__linear-server__list_projects",
+      "mcp__linear-server__save_issue",
+      "mcp__linear-server__save_project",
+      "mcp__linear-server__list_issues",
+      "Bash(sed -i \"s|import\\('@/lib/gamification'\\)|import\\('@/lib/gamification/core'\\)|g\" /home/debian/documents/Github/picada-app/lib/auth/identity.ts)",
+      "Bash(sed -i \"s|import\\('@/lib/restaurants'\\)|import\\('@/lib/places/restaurants'\\)|g\" /home/debian/documents/Github/picada-app/components/profile-feedie-chrome.tsx /home/debian/documents/Github/picada-app/components/profile-view.tsx)"
     ]
   }
 }

@@ -2,8 +2,8 @@
 
 import { useState } from 'react'
 import { getAuthHeaders } from '@/lib/api/auth'
-import { getOrCreateIdentity } from '@/lib/identity'
-import type { UnifiedContentPayload } from '@/lib/content-model'
+import { getOrCreateIdentity } from '@/lib/auth/identity'
+import type { UnifiedContentPayload } from '@/lib/content/model'
 import { validatePostDetailsInput } from '@/lib/validation/post-form-schema'
 
 type SubmitInput = {

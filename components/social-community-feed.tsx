@@ -12,10 +12,10 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import type { SocialPost } from '@/app/api/social-feed/route'
-import { isAuthenticatedClient, requireAuthOrPrompt } from '@/lib/auth-gate'
-import type { Restaurant } from '@/lib/restaurants'
-import { slugDisplayFromAutomatedSlug } from '@/lib/place-tags-display'
-import { sanitizeUserText } from '@/lib/sanitize'
+import { isAuthenticatedClient, requireAuthOrPrompt } from '@/lib/auth/gate'
+import type { Restaurant } from '@/lib/places/restaurants'
+import { slugDisplayFromAutomatedSlug } from '@/lib/tags/display'
+import { sanitizeUserText } from '@/lib/utils/sanitize'
 
 // ─── Local post type (from localStorage) ──────────────────────────────────────
 

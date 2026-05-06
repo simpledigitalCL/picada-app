@@ -1,8 +1,8 @@
 import { createHash } from 'crypto'
 import { NextResponse } from 'next/server'
-import { hydrateAutomatedSeedTagsFromPlacesDb, mergeInferredTagsForDiscover } from '@/lib/discover-item-tags'
-import { buildMergedPlaceClassification } from '@/lib/merge-automated-place-tags'
-import type { PlaceTaggingMeta } from '@/lib/place-tagging-types'
+import { hydrateAutomatedSeedTagsFromPlacesDb, mergeInferredTagsForDiscover } from '@/lib/tags/discover-item'
+import { buildMergedPlaceClassification } from '@/lib/tags/merge-automated'
+import type { PlaceTaggingMeta } from '@/lib/tags/types'
 import { getServerGoogleMapsApiKey } from '@/lib/server/env'
 import { getSupabaseServerClient } from '@/lib/supabase-server'
 

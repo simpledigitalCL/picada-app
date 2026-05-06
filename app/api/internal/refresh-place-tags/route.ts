@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
-import { buildMergedPlaceClassification } from '@/lib/merge-automated-place-tags'
-import type { PlaceTaggingMeta } from '@/lib/place-tagging-types'
+import { buildMergedPlaceClassification } from '@/lib/tags/merge-automated'
+import type { PlaceTaggingMeta } from '@/lib/tags/types'
 import { getSupabaseServerClient } from '@/lib/supabase-server'
 
 /**

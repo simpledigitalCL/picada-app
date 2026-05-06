@@ -1,6 +1,6 @@
 'use client'
 
-import { getOrCreateIdentity } from '@/lib/identity'
+import { getOrCreateIdentity } from '@/lib/auth/identity'
 import { trackDomainEvent } from '@/lib/api/events'
 
 export type DomainEventType =

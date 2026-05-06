@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getSupabaseServerClient } from '@/lib/supabase-server'
-import { placeTextMatchesLocation } from '@/lib/location-query-match'
+import { placeTextMatchesLocation } from '@/lib/location/query-match'
 
 type PicadaRankRow = {
   picada_id: string

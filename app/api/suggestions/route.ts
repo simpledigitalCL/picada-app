@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server'
 import { getSupabaseServerClient } from '@/lib/supabase-server'
-import { LOCAL_KIND_DEFAULT_FOOD_SUGGESTIONS, LOCAL_KIND_OPTIONS } from '@/lib/venue-classification-tags'
-import { storedTagForFoodPick } from '@/lib/food-content-tags'
-import { slugSegment } from '@/lib/tag-slug'
+import { LOCAL_KIND_DEFAULT_FOOD_SUGGESTIONS, LOCAL_KIND_OPTIONS } from '@/lib/tags/venue-classification'
+import { storedTagForFoodPick } from '@/lib/tags/food-content'
+import { slugSegment } from '@/lib/tags/slug'
 
 /** Mínimo de usuarios distintos contribuyentes para considerar estadística "lista" para UX */
 const SMART_MIN_UNIQUE_USERS = 3

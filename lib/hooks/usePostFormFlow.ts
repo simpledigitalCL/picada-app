@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from 'react'
 import type { PostFormType } from '@/components/global-action-button'
-import type { PlaceSuggestion } from '@/components/place-selector'
+import type { PlaceSuggestion } from '@/components/search/place-selector'
 
 export type PostFormAccumulator = {
   restaurantQuery:  string

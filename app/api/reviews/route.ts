@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getSupabaseServerClient } from '@/lib/supabase-server'
 import { requireAuthenticatedUser } from '@/lib/server/auth'
-import { sanitizeUserText } from '@/lib/sanitize'
+import { sanitizeUserText } from '@/lib/utils/sanitize'
 
 export async function POST(req: Request) {
   const authUser = await requireAuthenticatedUser(req)

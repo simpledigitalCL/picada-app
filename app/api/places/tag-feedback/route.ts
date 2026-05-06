@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
-import { buildMergedPlaceClassification } from '@/lib/merge-automated-place-tags'
+import { buildMergedPlaceClassification } from '@/lib/tags/merge-automated'
 import { getSupabaseServerClient } from '@/lib/supabase-server'
-import type { PlaceTaggingMeta } from '@/lib/place-tagging-types'
+import type { PlaceTaggingMeta } from '@/lib/tags/types'
 
 type Body = {
   externalId?: string
