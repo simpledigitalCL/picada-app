@@ -492,11 +492,90 @@ npm run android:sync:prod      # Sync apuntando a dominio de producción
 
 ### Sistema de Tags
 
-Los tags son el corazón del sistema de personalización:
-- **Tag catalog** (`lib/food-catalog.ts`, `tag-catalog` en DB): catálogo normalizado
-- **Auto-tags** (`lib/place-auto-tagging.ts`): generados por IA al registrar local
-- **User affinity** (`user_tag_affinity` en DB): score de afinidad usuario-tag, actualizado al interactuar
-- **Tag normalization** (`lib/tag-normalization.ts`): unifica variantes ("vegetariano" = "vegano" de nivel 1, etc.)
+Los tags son el corazón del sistema de personalización. Conectan a los usuarios con los locales a través de sus preferencias reales de consumo.
+
+#### Tipos de tags
+
+| Tipo | Ejemplos | Origen |
+|---|---|---|
+| **Comida** | `pizza`, `sushi`, `vegano`, `sin_gluten` | Manual (usuario) + IA |
+| **Ambiente/Venue** | `romantico`, `familiar`, `terraza`, `pet_friendly` | Manual (usuario) + IA |
+| **Mood** | `chill`, `para_grupos`, `noche`, `almuerzo_rapido` | Manual (usuario) |
+| **Clasificación** | `picada`, `restoran`, `cafe`, `bar` | IA + categoría de Google Maps |
+| **Experiencia** | `buen_servicio`, `precio_calidad`, `instagram_worthy` | Manual (usuario) |
+
+#### Flujo de vida de un tag
+
+```
+1. ORIGEN
+   ├── Usuario al escribir reseña → elige tags de mood, venue y comida
+   ├── IA al registrar un local → place-auto-tagging.ts llama a Claude
+   └── Google Maps → categoría del local se convierte en tags iniciales
+
+2. NORMALIZACIÓN (lib/tag-normalization.ts)
+   └── Unifica variantes: "sin gluten" = "sin_gluten" = "gluten free"
+       "veggie" = "vegetariano", etc.
+
+3. ALMACENAMIENTO
+   ├── tag_catalog → catálogo maestro (slug, nombre, categoría, conteo de uso)
+   ├── place_tags  → tags asociados a cada local (con peso/score)
+   └── user_tag_affinity → score de afinidad usuario↔tag (se acumula)
+
+4. ACTUALIZACIÓN DE AFINIDAD
+   └── Cada vez que el usuario interactúa (reseña, like, visita, búsqueda):
+       → /api/affinity/track suma puntos al score del tag correspondiente
+       → user_tag_affinity se actualiza en Supabase
+
+5. USO EN PERSONALIZACIÓN
+   ├── Match Score (lib/place-match.ts)
+   │     → compara tags del local vs afinidad del usuario → score 0-100
+   ├── Feed de recomendaciones (/api/recommendations)
+   │     → ordena locales por match score + distancia + popularidad
+   └── Reels Feed (lib/reels-personalization.ts)
+         → mezcla locales nuevos con locales de alta afinidad
+```
+
+#### Catálogo de tags (`tag_catalog`)
+
+Cada tag en el catálogo tiene:
+- `slug`: identificador único normalizado (ej. `sin_gluten`)
+- `label`: nombre legible (ej. "Sin Gluten")
+- `category`: tipo de tag (`food`, `venue`, `mood`, `classification`)
+- `use_count`: cuántos locales lo tienen — sirve para ordenar el autocomplete
+- `aliases`: variantes que se normalizan a este slug
+
+#### Score de afinidad (`user_tag_affinity`)
+
+```
+score = Σ (peso_accion × frecuencia)
+
+Pesos por acción:
+  reseña con tag     → +3
+  like a post con tag → +1
+  visita a local con tag → +2
+  búsqueda con tag   → +1
+  tag en preferencias de perfil → +5 (inicial)
+```
+
+El score se decae suavemente con el tiempo para reflejar gustos actuales (no solo histórico). Se recalcula en cada llamada a `/api/affinity`.
+
+#### Auto-tagging por IA (`lib/place-auto-tagging.ts`)
+
+Al registrar un local nuevo (desde Google Maps o sugerido por usuario):
+1. Se recopila: nombre del local, categoría de Google, dirección, primeras reseñas
+2. Se envía a Claude con un prompt estructurado
+3. Claude retorna un JSON con tags sugeridos por categoría
+4. Los tags pasan por normalización y se insertan en `place_tags` con `source = 'ai'`
+5. Los tags de usuario tienen `source = 'user'` y mayor peso en el match score
+
+#### Feedback de tags (usuarios contribuyen)
+
+Los usuarios pueden confirmar o rechazar tags de un local desde la vista de detalle:
+- Confirmar → `tag_feedback` con `vote = 1` → aumenta el peso del tag en ese local
+- Rechazar → `tag_feedback` con `vote = -1` → reduce el peso
+- Endpoint: `/api/places/tag-feedback`
+
+Esto permite que la comunidad corrija errores del auto-tagging de IA.
 
 ### Identidad anónima
 
@@ -538,6 +617,9 @@ Antes del login, el usuario tiene una identidad anónima (`lib/identity.ts`) alm
 - [ ] CI/CD pipeline (sin configurar)
 - [ ] Rate limiting en API Routes (sin implementar)
 - [ ] La carpeta `feedie/` contiene un fork/prototipo alternativo del proyecto — no está integrada en el build principal
+- [ ] Mejoras en la UX y reparación de gamificación ya implementada
+- [ ] Fix de formularios y corroboración de tags
+- [ ] Mejora en flujo de Foodie (Red Social)
 
 ---
 
