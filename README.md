@@ -20,6 +20,7 @@ Aplicación móvil/web de descubrimiento gastronómico con mapa interactivo, res
 12. [Scripts disponibles](#scripts-disponibles)
 13. [Convenciones y decisiones de diseño](#convenciones-y-decisiones-de-diseño)
 14. [Estado actual y trabajo pendiente](#estado-actual-y-trabajo-pendiente)
+15. [Roadmap B2B — Funcionalidades por desarrollar](#roadmap-b2b--funcionalidades-por-desarrollar)
 
 ---
 
@@ -683,3 +684,322 @@ tag_catalog
 
 > Proyecto desarrollado para el mercado chileno. Lenguaje de la UI: español (Chile).  
 > Stack elegido para máxima velocidad de desarrollo con tipado fuerte end-to-end (TypeScript + Zod + Supabase types).
+
+---
+
+## Roadmap B2B — Funcionalidades por desarrollar
+
+Esta sección documenta las funcionalidades del modelo de negocio que **aún no están implementadas** en el código actual. El programador debe leerla como la hoja de ruta del producto: qué viene después, cómo se conecta con lo ya construido y qué nuevas tablas/endpoints se necesitan.
+
+---
+
+### 1. SaaS para Locales (B2B) — Módulo de Suscripciones
+
+El modelo de ingresos principal. Los locales pagan una suscripción mensual para acceder a estadísticas, herramientas de marketing y visibilidad premium dentro de la app.
+
+#### Planes definidos
+
+| Plan | Precio/mes | Funcionalidades clave |
+|---|---|---|
+| **Básico** | Gratis | Perfil básico, máx. 5 fotos, sin estadísticas |
+| **Local Verificado** | CLP $19.990 | Badge oficial, estadísticas de visitas, respuesta a reseñas, 1 oferta/mes |
+| **Local Pro** | CLP $39.990 | Todo lo anterior + campañas a Inspectores, API de menú pública, exportación de datos |
+| **Cadena / Franquicia** | CLP $89.990 | Multi-sucursal, dashboard centralizado, informe mensual de tendencias |
+
+#### Qué hay que construir
+
+```
+Nuevas tablas en Supabase:
+  local_subscriptions   → plan_id, local_id, status, billing_cycle, next_billing_at
+  local_subscription_plans → id, name, price_clp, features_json, limits_json
+
+Nuevos endpoints:
+  /api/billing/subscribe       → crear/actualizar suscripción (integrar con Transbank o Stripe)
+  /api/billing/webhook         → recibir eventos de pago (renovación, fallo, cancelación)
+  /api/local/dashboard         → estadísticas del local: visitas, conversiones, alcance
+
+Nuevo panel en la app:
+  /app/local-dashboard/        → vista exclusiva para dueños de locales suscritos
+    ├── métricas de visitas generadas por la app
+    ├── historial de reseñas recibidas con gestión de respuesta
+    ├── gestión de ofertas activas para Inspectores
+    └── exportación de datos en CSV/PDF
+```
+
+**Nota técnica:** El campo `plan_id` del local determina qué funcionalidades se habilitan en la API. Implementar como middleware de autorización que verifica el plan antes de responder endpoints premium.
+
+---
+
+### 2. Motor de Comisiones por Conversión (Performance)
+
+Modelo de pago por resultado: los locales pagan **8% de comisión** sobre menús de prueba canjeados a través de la app. Si no hay canje exitoso, no hay cobro.
+
+#### Flujo del canje
+
+```
+1. Local publica oferta ("Menú de prueba gratis para Inspectores nivel 3+")
+   → tabla: local_offers (id, local_id, description, discount_type, min_inspector_level, quota, expires_at)
+
+2. Usuario Inspector ve la oferta y la reserva
+   → tabla: offer_reservations (id, offer_id, user_id, qr_code_token, reserved_at, status)
+
+3. En el local, el usuario presenta el QR
+   → endpoint: POST /api/offers/redeem { token }
+   → validar: token válido, usuario tiene nivel requerido, cupo disponible
+   → marcar como canjeado
+
+4. Canje confirmado → registrar comisión
+   → tabla: commissions (id, offer_id, local_id, amount_clp, rate, status, created_at)
+   → cobro agrupado mensual al local
+
+5. Dar XP al usuario por el canje
+   → emitir evento de dominio → motor de gamificación
+```
+
+**Estado actual:** La tabla `local_offers` y el sistema de QR no están implementados. La gamificación está lista para recibir el evento del canje.
+
+---
+
+### 3. Algoritmo de Tendencias — Motor Viral
+
+El motor que detecta qué locales están emergiendo **antes que nadie**, basado en 7 señales en tiempo real. Es uno de los diferenciadores clave del producto.
+
+#### Las 7 señales y sus pesos
+
+| Señal | Peso | Descripción técnica |
+|---|---|---|
+| Velocidad de escaneos | 25% | Aceleración en fotos subidas en ventana de 48h (derivada del conteo) |
+| Tasa de compartición | 20% | `comparticiones / visitas_app` por local en los últimos 7 días |
+| Verificación comunitaria | 20% | Nº de usuarios distintos que validaron el mismo plato |
+| Conversión de contenido | 15% | Clics desde RRSS hacia el perfil del local en la app |
+| Rating de precisión | 10% | Coincidencia entre macros estimados y datos confirmados por el local |
+| Frecuencia de retorno | 5% | % de usuarios que visitan el mismo local más de 1 vez en 30 días |
+| Diversidad de perfiles | 5% | Distintos tipos de dieta (tags) presentes entre los visitantes |
+
+#### Qué hay que construir
+
+```
+Nueva tabla:
+  trend_scores (id, local_id, score_total, signals_json, badge_active, calculated_at)
+  → calculada periódicamente (cron job cada 6h)
+  → signals_json almacena el detalle de cada señal para auditoría
+
+Nuevo endpoint:
+  GET /api/picada-ranking/trending   → top 20 locales por trend_score en una zona
+  → ya existe /api/picada-ranking, extender con este modo
+
+Job periódico (Edge Function o cron en Supabase):
+  → recalcula trend_scores cada 6 horas
+  → activa/desactiva el badge "Local Emergente" en el mapa
+
+Efecto en UI:
+  → badge especial en el mapa para locales con badge_active = true
+  → sección "Emergiendo ahora" en el feed de inicio
+```
+
+**Nota importante:** El algoritmo tiene un efecto flywheel intencional: aparecer como emergente aumenta el tráfico, que aumenta el score, que mantiene el badge. Diseñado para favorecer orgánicamente a locales de calidad sobre los que pagan publicidad.
+
+---
+
+### 4. Content Engine — Herramientas de Contenido Viral
+
+Motor que convierte la actividad de los usuarios en activos para redes sociales. Es la funcionalidad que cierra el loop entre la app y el contenido viral en TikTok/Instagram.
+
+#### Componentes a desarrollar
+
+**a) Data-overlay automático**
+- Al escanear un plato y obtener los macros, generar una tarjeta visual (imagen PNG) con los datos superpuestos, lista para compartir en Stories/Reels
+- Tecnología sugerida: Fabric.js (ya instalado) o Satori (generación de imágenes en Edge Functions)
+- Endpoint: `POST /api/content/generate-overlay { scan_id }` → devuelve URL de imagen generada en Supabase Storage
+
+**b) Picada Wrapped (anual)**
+- Resumen estilo Spotify: "Este año visitaste 47 locales, consumiste X calorías, tu picada favorita fue..."
+- Datos disponibles en: `user_visits`, `user_reviews`, `escaneos`
+- Endpoint: `GET /api/content/wrapped?year=2025&user_id=...`
+- Genera una secuencia de slides (imágenes o animación) exportable
+
+**c) Media Kit para locales**
+- Badge descargable "Local Verificado en Picada.App" con datos reales
+- Incluye: nº de visitas generadas por la app, rating de la comunidad, mes de verificación
+- Disponible solo para plan Local Verificado o superior
+- Endpoint: `GET /api/local/media-kit { local_id }` → PDF o imagen PNG
+
+**d) Tracking de conversiones desde RRSS**
+- URL con parámetros UTM generada para cada influencer/post: `picada.app/local/{id}?ref={usuario_id}`
+- Al abrir, registra en `content_conversions (id, local_id, referrer_user_id, source_platform, clicked_at)`
+- El influencer puede ver en su perfil cuántas visitas físicas generó su contenido
+
+---
+
+### 5. Dashboard Influencer-Local (Colaboración)
+
+Panel que conecta a Inspectores/influencers con locales para campañas medibles.
+
+#### Flujo de colaboración
+
+```
+Local (plan Pro) crea una campaña:
+  → "Busco Inspectores nivel 2+ para probar nuestro nuevo menú de verano"
+  → define: cupo, nivel mínimo requerido, beneficio, fecha límite
+
+Inspector postula / acepta:
+  → notificación push al Inspector que califica
+  → acepta → reserva QR (ver módulo de comisiones)
+
+Local valida la visita:
+  → escanea QR del Inspector en caja
+  → sistema registra: visita confirmada, foto del plato requerida
+
+Post-visita:
+  → Inspector sube contenido (foto/video) etiquetando el local
+  → el link de la publicación se adjunta a la campaña
+  → local ve en su dashboard: cuántos posts generó, alcance estimado, conversiones
+
+Inspector ve en su perfil:
+  → campañas participadas, visitas generadas, comisión acumulada (si aplica nivel Gurú)
+```
+
+**Nuevas tablas requeridas:**
+```sql
+campaigns         (id, local_id, title, min_level, quota, benefit, status, expires_at)
+campaign_joins    (id, campaign_id, user_id, status, qr_token, joined_at, visited_at)
+campaign_content  (id, campaign_join_id, content_url, platform, reach_estimated)
+```
+
+---
+
+### 6. Módulo de Datos e Inteligencia de Mercado (Enterprise)
+
+Venta de reportes de tendencias anonimizados a supermercados, marcas de alimentos, fondos de inversión y municipios.
+
+#### Ejemplos de reportes
+
+- "Los platos de pollo aumentaron 34% en locales de Providencia en los últimos 90 días"
+- "El tag 'keto' creció 2,3x en búsquedas durante enero en RM"
+- "Top 10 comunas con mayor densidad de locales veganos verificados"
+
+#### Qué hay que construir
+
+```
+Capa de anonimización:
+  → nunca exponer user_id ni datos individuales
+  → agregar por local_slug + zona geográfica + período de tiempo
+  → umbral mínimo: solo publicar datos con N ≥ 30 registros (protección de privacidad)
+
+Endpoint interno de generación de reportes:
+  POST /api/enterprise/reports/generate
+  → input: tipo de reporte, zona, período, categoría
+  → output: JSON con datos agregados + PDF renderizado
+
+Panel de administración (ya existe /app/api/admin/):
+  → gestionar clientes enterprise, emitir reportes, registrar pagos
+  → acceso restringido por SUPABASE_SERVICE_ROLE_KEY + rol admin en profiles
+
+Precio por reporte: desde CLP $2.500.000
+```
+
+---
+
+### 7. Seed Data — Script de Carga Inicial de Locales
+
+Para resolver el problema del "mapa vacío al lanzar", se necesita un script que pre-cargue locales desde Google Maps antes del lanzamiento público.
+
+#### Plan técnico
+
+```
+Script: scripts/seed-places.py  (pendiente de crear)
+
+Fuentes de datos:
+  1. Google Maps Places API (New) — búsqueda por zona + categoría
+  2. Foursquare Places API (tier gratuito) — enriquecer con teléfono, precio estimado
+  3. Curación manual — 200 "picadas destacadas" con datos verificados a mano
+
+Ciudades objetivo al lanzamiento:
+  → Santiago RM (prioridad), Valparaíso, Concepción, Temuco, Rancagua, Antofagasta
+
+Volumen objetivo: 5.000 locales pre-cargados antes del lanzamiento público
+
+Proceso:
+  1. Buscar por zona geográfica + categoría (restaurant, cafe, bar, picada, etc.)
+  2. Mapear categorías de Google → local_slug (Capa 1 del sistema de tags)
+  3. Insertar en tabla places con source = 'seed'
+  4. Disparar auto-tagging por el sistema de puntuación (no IA)
+  5. Marcar como verified = false hasta validación comunitaria
+
+Consideraciones éticas:
+  → respetar rate limits de las APIs
+  → no scraping directo de HTML, solo APIs oficiales
+  → datos solo de acceso público (nombre, dirección, categoría, horarios)
+```
+
+---
+
+### 8. Push Notifications — Firebase Cloud Messaging
+
+Alertas en tiempo real para aumentar el retention y el engagement.
+
+#### Notificaciones prioritarias a implementar
+
+| Trigger | Mensaje | Prioridad |
+|---|---|---|
+| Menú ejecutivo activo en local favorito | "🍽 La Picada de Doña Rosa tiene menú activo ahora (11:30–15:00)" | Alta |
+| Inspector sube de nivel | "🏆 Subiste a Inspector nivel 3 — ya puedes acceder a menús de prueba" | Alta |
+| Local emergente cerca | "🔥 Nuevo local emergente a 3 cuadras de tu zona habitual" | Media |
+| Racha en riesgo | "⚡ Tu racha de 12 días está en riesgo — explora algo hoy" | Media |
+| Campaña disponible para el nivel del usuario | "🎁 3 locales nuevos buscan Inspectores de tu nivel esta semana" | Media |
+| Like recibido en reseña | "+5 XP — alguien encontró útil tu reseña en El Rincón del Profe" | Baja |
+
+**Stack:** Firebase Cloud Messaging (FCM) para Android, APNs para iOS cuando se migre a Flutter. El token del dispositivo se almacena en `profiles.fcm_token`.
+
+---
+
+### 9. Migración a Flutter (iOS + Android nativo)
+
+El estado actual usa **Next.js + Capacitor** para Android. El plan de negocio contempla migrar a **Flutter** para tener un producto nativo en iOS y Android con mejor rendimiento.
+
+#### Decisión arquitectónica pendiente
+
+```
+Opción A — Mantener Next.js + Capacitor (corto plazo)
+  Pros: todo el código actual sirve, iOS via Capacitor también
+  Contras: rendimiento inferior al nativo, limitaciones de WebView
+
+Opción B — Migrar a Flutter (mediano plazo)
+  Pros: rendimiento nativo, mejor UX en mobile, acceso completo a APIs del SO
+  Contras: reescribir toda la UI (components/ → widgets Flutter)
+  El backend (Supabase + API Routes) no cambia
+
+Recomendación: mantener Next.js para el MVP y primeros 6 meses.
+Evaluar migración a Flutter al iniciar Año 2 si el presupuesto y el equipo lo permiten.
+```
+
+**Módulos que NO cambian en la migración:**
+- Toda la lógica de `lib/` (se puede portar a Dart o consumir via API)
+- Las API Routes de Next.js (el backend sigue siendo el mismo)
+- El schema de Supabase
+
+**Módulos que sí hay que reescribir:**
+- Todo `components/` → widgets Flutter
+- `app/page.tsx` y navegación → Navigator 2.0 / GoRouter en Flutter
+
+---
+
+### Resumen de prioridades para el programador
+
+```
+FASE 1 — MVP B2B (meses 1-3)
+  ✦ Panel de suscripciones para locales (tabla local_subscriptions + UI básica)
+  ✦ Sistema de ofertas + QR de canje (tablas local_offers + offer_reservations)
+  ✦ Push notifications con FCM (token en profiles + endpoint de envío)
+
+FASE 2 — Motor de crecimiento (meses 3-6)
+  ✦ Algoritmo de tendencias (trend_scores + cron job)
+  ✦ Data-overlay automático para compartir macros en RRSS
+  ✦ Dashboard de conversiones para influencers
+
+FASE 3 — Escala B2B (meses 6-12)
+  ✦ Dashboard completo para locales (estadísticas, campañas, media kit)
+  ✦ Script de seed data para nuevas ciudades
+  ✦ Módulo de reportes enterprise (anonimizados, con capa de privacidad)
+  ✦ Evaluar migración Flutter según métricas de UX
+```
