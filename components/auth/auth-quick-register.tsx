@@ -51,7 +51,7 @@ export function AuthQuickRegister() {
           }}
         >
           <Mail className="size-4" />
-          Gmail
+          Google
         </Button>
         <Button
           variant="outline"

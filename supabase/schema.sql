@@ -1,835 +1,606 @@
 -- =============================================================================
--- PICADA.APP — Schema completo (v2 — Madurez UX)
--- Ejecutar en Supabase SQL Editor. Idempotente: IF NOT EXISTS en todo.
+-- PICADA.APP — Schema de referencia (sincronizado con BD real)
+-- Última actualización: 2026-05-06
+--
+-- INSTRUCCIONES DE APLICACIÓN:
+--   1. Ejecutar este archivo en el SQL Editor de Supabase (idempotente).
+--   2. Luego aplicar cada archivo en supabase/migrations/ en orden cronológico.
+--
+-- TABLAS REALES EN PRODUCCIÓN:
+--   places, place_change_log, place_discovery_cache,
+--   content_submissions, tag_catalog, tag_relations_stats,
+--   tag_relation_user_pair, domain_events, user_tag_affinity
+--
+-- TABLAS NO IMPLEMENTADAS AÚN (definir en futuras migraciones si se necesitan):
+--   profiles, user_preferences, user_visits, user_reviews,
+--   posts, post_media, menu_items, user_points, follows, saved_items
 -- =============================================================================
 
-create extension if not exists pgcrypto;
-create extension if not exists pg_trgm; -- búsqueda difusa por nombre de local
-
--- =============================================================================
--- TABLAS DE USUARIO
--- =============================================================================
-
-create table if not exists public.profiles (
-  id          uuid primary key references auth.users(id) on delete cascade,
-  username    text unique not null,
-  bio         text default '',
-  avatar_url  text,
-  is_public   boolean default false,
-  -- Gamificación
-  points      int default 0,
-  level       int default 1,   -- 1=Explorador 2=Picador 3=Crítico 4=Leyenda
-  created_at  timestamptz default now(),
-  updated_at  timestamptz default now()
-);
-
-create table if not exists public.user_preferences (
-  user_id       uuid primary key references auth.users(id) on delete cascade,
-  likes         text[] default '{}',      -- ['picada','sushi','vegano','fitness']
-  restrictions  text[] default '{}',      -- ['sin_gluten','keto','vegetariano','vegano']
-  dislikes      text[] default '{}',      -- ['cilantro','aji','mariscos']
-  religion      text default 'ninguna',   -- 'ninguna' | 'jewish' | 'muslim' | 'other'
-  -- Experiencias buscadas (para matching)
-  experiences   text[] default '{}',      -- ['chill','familiar','romantico','grupos','noche']
-  -- Rango de precio preferido
-  min_price     int default 1,
-  max_price     int default 4,
-  -- Ubicación
-  location_label text default '',
-  location_mode  text default 'manual',   -- 'manual' | 'auto'
-  updated_at    timestamptz default now()
-);
-
-create table if not exists public.user_visits (
-  id            uuid primary key default gen_random_uuid(),
-  user_id       uuid not null references auth.users(id) on delete cascade,
-  place_id      uuid references public.places(id) on delete set null,
-  place_name    text not null,
-  visited_at    timestamptz default now()
-);
-
-create table if not exists public.user_favorites (
-  id          uuid primary key default gen_random_uuid(),
-  user_id     uuid not null references auth.users(id) on delete cascade,
-  place_id    uuid references public.places(id) on delete set null,
-  external_id text not null,
-  title       text not null,
-  author      text,
-  source_url  text not null,
-  created_at  timestamptz default now(),
-  unique(user_id, external_id)
-);
-
-create table if not exists public.user_reviews (
-  id            uuid primary key default gen_random_uuid(),
-  user_id       uuid not null references auth.users(id) on delete cascade,
-  place_id      uuid references public.places(id) on delete set null,
-  post_id       uuid references public.posts(id) on delete set null,
-  place_name    text not null,
-  review_text   text not null,
-  rating        int check (rating between 1 and 5),
-  mood_tags     text[] default '{}',
-  is_incognito  boolean default false,
-  visited_at    timestamptz,
-  created_at    timestamptz default now()
-);
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 -- =============================================================================
 -- CATÁLOGO GLOBAL DE LOCALES
--- Fuente de datos enriquecida. Se puebla desde Google, OSM o usuarios.
--- Reemplaza el concepto de "cache de API" con un registro persistente real.
 -- =============================================================================
 
-create table if not exists public.places (
-  id uuid primary key default gen_random_uuid(),
+CREATE TABLE IF NOT EXISTS public.places (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
 
-  -- Origen y estado
-  provider        text not null default 'google',  -- 'google' | 'osm' | 'user' | 'manual'
-  external_id     text,
-  status          text default 'active'             -- 'active' | 'pending' | 'draft'
-                  check (status in ('active','pending','draft')),
+  -- Origen
+  provider         text NOT NULL DEFAULT 'google',  -- 'google' | 'osm' | 'user' | 'manual'
+  external_id      text,
+  status           text DEFAULT 'active'
+                   CHECK (status IN ('active', 'pending', 'draft')),
 
   -- Identidad
-  name            text not null,
-  address         text,
-  commune         text,                             -- Comuna chilena (ej: Providencia)
-  city            text,
-  region          text,                             -- Región chilena (ej: Metropolitana)
-  country         text default 'CL',
-  phone           text,
-  website         text,
-  maps_url        text,
+  name             text NOT NULL,
+  address          text,
+  commune          text,
+  city             text,
+  region           text,
+  country          text DEFAULT 'CL',
+  phone            text,
+  website          text,
+  maps_url         text,
 
   -- Coordenadas
-  lat             double precision,
-  lng             double precision,
+  lat              double precision,
+  lng              double precision,
 
   -- Clasificación base
-  rating          numeric(3,1),
-  reviews_count   int default 0,
-  price_level     int check (price_level between 1 and 4),
-  opening_now     boolean,
-  category        text,    -- 'picada' | 'restaurante' | 'cafe' | 'bar' | 'sangucheria' | 'otro'
+  rating           numeric(3,1),
+  reviews_count    int DEFAULT 0,
+  price_level      int CHECK (price_level BETWEEN 1 AND 4),
+  category         text,
 
   -- Arrays de clasificación (para matching y filtros)
-  nutrition_categories  text[] default '{}',  -- ['keto','fitness','fastfood','vegano']
-  restrictions_supported text[] default '{}', -- ['sin_gluten','halal','kosher','vegano']
-  cuisines              text[] default '{}',  -- ['chilena','italiana','japonesa']
-  source_types          text[] default '{}',
-  experiences           text[] default '{}',  -- ['chill','familiar','romantico','grupos','noche']
+  -- restrictions_supported: 'vegetariano','vegano','sin_gluten','halal','kosher','keto','sin_lactosa'
+  restrictions_supported text[] DEFAULT '{}',
+  -- amenities: 'delivery','takeout','outdoor_seating','wifi','parking','reservations',
+  --            'family_friendly','pet_friendly','open_late'
+  amenities        text[] DEFAULT '{}',
+  -- nutrition_categories: 'keto','fitness','fastfood','vegano'
+  nutrition_categories text[] DEFAULT '{}',
+  -- cuisines: 'chilena','italiana','japonesa', etc.
+  cuisines         text[] DEFAULT '{}',
+  -- source_types: tipo de fuente de datos
+  source_types     text[] DEFAULT '{}',
+  -- experiences: 'chill','familiar','romantico','grupos','noche'
+  experiences      text[] DEFAULT '{}',
 
-  -- ── Flags dietéticos booleanos (índices rápidos para matching) ───────────────
-  -- Derivados de restrictions_supported pero indexables con predicados simples
-  is_vegetarian_friendly  boolean default false,
-  is_vegan_friendly       boolean default false,
-  is_gluten_free_friendly boolean default false,
-  is_halal                boolean default false,
-  is_kosher               boolean default false,
-  is_keto_friendly        boolean default false,
-  is_lactose_free         boolean default false,
+  -- Puntuación "Picada Score" (0–100)
+  picada_score     int DEFAULT 50 CHECK (picada_score BETWEEN 0 AND 100),
 
-  -- ── Features del local ───────────────────────────────────────────────────────
-  has_delivery            boolean default false,
-  has_takeout             boolean default false,
-  has_outdoor_seating     boolean default false,
-  has_wifi                boolean default false,
-  has_parking             boolean default false,
-  accepts_reservations    boolean default false,
-  is_family_friendly      boolean default true,
-  is_pet_friendly         boolean default false,
-  is_open_late            boolean default false,   -- cierra después de 23:00
-
-  -- ── Puntuación "Picada Score" ─────────────────────────────────────────────────
-  -- 0-100: cuán "picada secreta" es el local.
-  -- Alto = precio bajo + rating alto + poco conocido.
-  picada_score    int default 50 check (picada_score between 0 and 100),
-
-  -- Rating interno (promedio de user_reviews)
+  -- Rating interno (promedio de reseñas de la comunidad)
   internal_rating       numeric(3,2),
-  internal_rating_count int default 0,
+  internal_rating_count int DEFAULT 0,
 
-  -- Media
-  gallery         jsonb default '[]'::jsonb,   -- [{url, source, is_primary}]
-  raw_payload     jsonb default '{}'::jsonb,
+  -- Media y payload crudo de Google Maps
+  gallery          jsonb DEFAULT '[]'::jsonb,
+  raw_payload      jsonb DEFAULT '{}'::jsonb,
+
+  -- Metadatos de auto-tagging (IA + comunidad)
+  tagging_meta     jsonb DEFAULT '{}'::jsonb,
 
   -- Trazabilidad comunitaria
-  submitted_by    uuid references auth.users(id) on delete set null,
-  verified_by     uuid references auth.users(id) on delete set null,
-  first_photo_by  uuid references auth.users(id) on delete set null,  -- +10 pts
+  submitted_by     uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+  verified_by      uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+  first_photo_by   uuid REFERENCES auth.users(id) ON DELETE SET NULL,
 
-  content_hash    text,
-  last_synced_at  timestamptz default now(),
-  is_active       boolean default true,
-  created_at      timestamptz default now(),
-  updated_at      timestamptz default now(),
-  unique(provider, external_id)
+  content_hash     text,
+  last_synced_at   timestamptz DEFAULT now(),
+  is_active        boolean DEFAULT true,
+  created_at       timestamptz DEFAULT now(),
+  updated_at       timestamptz DEFAULT now(),
+
+  UNIQUE (provider, external_id)
 );
 
--- Índices para búsqueda geoespacial y matching
-create index if not exists idx_places_lat_lng          on public.places(lat, lng);
-create index if not exists idx_places_provider_external on public.places(provider, external_id);
-create index if not exists idx_places_commune          on public.places(commune);
-create index if not exists idx_places_city_region      on public.places(city, region);
-create index if not exists idx_places_status           on public.places(status);
-create index if not exists idx_places_category         on public.places(category);
-create index if not exists idx_places_price            on public.places(price_level);
--- Búsqueda difusa por nombre
-create index if not exists idx_places_name_trgm        on public.places using gin(name gin_trgm_ops);
--- Matching por arrays
-create index if not exists idx_places_nutrition_categories   on public.places using gin(nutrition_categories);
-create index if not exists idx_places_restrictions_supported on public.places using gin(restrictions_supported);
-create index if not exists idx_places_cuisines               on public.places using gin(cuisines);
-create index if not exists idx_places_experiences            on public.places using gin(experiences);
+CREATE INDEX IF NOT EXISTS idx_places_lat_lng               ON public.places(lat, lng);
+CREATE INDEX IF NOT EXISTS idx_places_provider_external     ON public.places(provider, external_id);
+CREATE INDEX IF NOT EXISTS idx_places_commune               ON public.places(commune);
+CREATE INDEX IF NOT EXISTS idx_places_city_region           ON public.places(city, region);
+CREATE INDEX IF NOT EXISTS idx_places_status                ON public.places(status);
+CREATE INDEX IF NOT EXISTS idx_places_category              ON public.places(category);
+CREATE INDEX IF NOT EXISTS idx_places_price                 ON public.places(price_level);
+CREATE INDEX IF NOT EXISTS idx_places_name_trgm             ON public.places USING gin(name gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_places_restrictions          ON public.places USING gin(restrictions_supported);
+CREATE INDEX IF NOT EXISTS idx_places_amenities             ON public.places USING gin(amenities);
+CREATE INDEX IF NOT EXISTS idx_places_nutrition_categories  ON public.places USING gin(nutrition_categories);
+CREATE INDEX IF NOT EXISTS idx_places_cuisines              ON public.places USING gin(cuisines);
+CREATE INDEX IF NOT EXISTS idx_places_experiences           ON public.places USING gin(experiences);
+CREATE INDEX IF NOT EXISTS idx_places_tagging_seed          ON public.places
+  ((tagging_meta -> 'automated_seed' ->> 'generated_at'))
+  WHERE (tagging_meta -> 'automated_seed') IS NOT NULL;
 
 -- =============================================================================
--- ITEMS DE MENÚ — Platos con datos nutricionales
+-- AUDITORÍA Y CACHÉ DE DATOS EXTERNOS
 -- =============================================================================
 
-create table if not exists public.menu_items (
-  id          uuid primary key default gen_random_uuid(),
-  place_name  text not null,
-  place_id    uuid references public.places(id) on delete set null,
-  item_name   text not null,
-  review_text text default '',
-  rating      int check (rating between 1 and 5),
-  photo_url   text,
-  nutrition   jsonb default '{}'::jsonb,  -- {kcal,protein,carbs,fat,source}
-  show_nutrition boolean default true,
-  source      text default 'community',   -- 'community' | 'official' | 'ai'
-  is_official boolean default false,
-  upvotes_count int default 0,
-  impact_score  numeric default 0,
-  photo_votes   jsonb default '{}'::jsonb,
-  metadata      jsonb default '{}'::jsonb,
-  created_at    timestamptz default now()
+CREATE TABLE IF NOT EXISTS public.place_change_log (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  place_id         uuid NOT NULL REFERENCES public.places(id) ON DELETE CASCADE,
+  previous_payload jsonb NOT NULL,
+  current_payload  jsonb NOT NULL,
+  changed_fields   text[] DEFAULT '{}',
+  detected_at      timestamptz DEFAULT now()
 );
 
-create index if not exists idx_menu_items_place_name on public.menu_items(place_name);
-create index if not exists idx_menu_items_place_item on public.menu_items(place_name, item_name);
-create index if not exists idx_menu_items_place_id   on public.menu_items(place_id);
+CREATE TABLE IF NOT EXISTS public.place_discovery_cache (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  location_key text UNIQUE NOT NULL,
+  source       text NOT NULL,
+  place_ids    uuid[] DEFAULT '{}',
+  payload      jsonb NOT NULL DEFAULT '[]'::jsonb,
+  fetched_at   timestamptz DEFAULT now(),
+  expires_at   timestamptz NOT NULL
+);
 
 -- =============================================================================
--- POSTS — Contenido del botón "+" (motor social)
--- Soporta: reseña, foto/video, incógnito, tips
+-- SISTEMA DE TAGS
 -- =============================================================================
 
-create table if not exists public.posts (
-  id            uuid primary key default gen_random_uuid(),
+-- Catálogo global de tags validados
+-- category: 'food' | 'dress' | 'ambience' | 'local' | 'service'
+CREATE TABLE IF NOT EXISTS public.tag_catalog (
+  slug         text PRIMARY KEY,
+  display_name text NOT NULL,
+  category     text NOT NULL
+               CHECK (category IN ('food', 'dress', 'ambience', 'local', 'service')),
+  status       text DEFAULT 'verified',
+  created_at   timestamptz DEFAULT now()
+);
 
-  -- Autoría
-  -- is_incognito=true → user_id guardado en BD pero NUNCA expuesto en queries de app
-  user_id       uuid references auth.users(id) on delete cascade,
-  place_id      uuid references public.places(id) on delete set null,
+-- Co-ocurrencia agregada entre tags (para sugerencias)
+CREATE TABLE IF NOT EXISTS public.tag_relations_stats (
+  id                  bigint PRIMARY KEY GENERATED BY DEFAULT AS IDENTITY,
+  source_tag          text REFERENCES public.tag_catalog(slug),
+  target_tag          text REFERENCES public.tag_catalog(slug),
+  relation_type       text NOT NULL,
+  co_occurrence_count int DEFAULT 0,
+  unique_users_count  int DEFAULT 0,
+  last_updated        timestamptz DEFAULT now(),
+  UNIQUE (source_tag, target_tag, relation_type)
+);
 
-  -- Tipo de contenido
-  type          text not null
-                check (type in ('review','photo','video','incognito','tip')),
+CREATE INDEX IF NOT EXISTS idx_tag_relations_source_type
+  ON public.tag_relations_stats(source_tag, relation_type, co_occurrence_count DESC);
 
-  -- Contenido
-  content       text,                    -- texto del comentario / reseña
-  rating        int check (rating between 1 and 5),
-  mood_tags     text[] default '{}',
-  -- ['chill','familiar','romantico','grupos','trabajo','noche','economico','especial']
+-- Pares individuales de co-ocurrencia por usuario (fuente de verdad)
+CREATE TABLE IF NOT EXISTS public.tag_relation_user_pair (
+  source_tag    text NOT NULL REFERENCES public.tag_catalog(slug),
+  target_tag    text NOT NULL REFERENCES public.tag_catalog(slug),
+  relation_type text NOT NULL,
+  user_id       uuid NOT NULL,
+  created_at    timestamptz DEFAULT now(),
+  PRIMARY KEY (source_tag, target_tag, relation_type, user_id)
+);
 
-  -- Para posts sin local vinculado (tip libre, incógnito sin tag)
+-- Afinidad acumulada de un usuario con cada tag
+CREATE TABLE IF NOT EXISTS public.user_tag_affinity (
+  user_id    uuid NOT NULL,
+  tag_slug   text NOT NULL,
+  weight     integer NOT NULL DEFAULT 0,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, tag_slug)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_tag_affinity_user    ON public.user_tag_affinity(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_tag_affinity_weight  ON public.user_tag_affinity(weight DESC);
+CREATE INDEX IF NOT EXISTS idx_user_tag_affinity_updated ON public.user_tag_affinity(updated_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_tag_affinity_user_tag
+  ON public.user_tag_affinity(user_id, tag_slug);
+
+-- =============================================================================
+-- EVENTOS DE DOMINIO (gamificación + ranking event-driven)
+-- =============================================================================
+
+-- user_id text: soporta usuarios anónimos (localStorage ID).
+-- auth_user_id uuid: FK válido cuando el usuario está autenticado.
+CREATE TABLE IF NOT EXISTS public.domain_events (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  event_type    text NOT NULL
+                CHECK (event_type IN (
+                  'CONTENT_CREATED', 'USER_VOTED', 'USER_REVIEWED',
+                  'USER_SAVED', 'USER_VISITED', 'USER_SCANNED'
+                )),
+  user_id       text,
+  auth_user_id  uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+  username      text,
+  payload       jsonb NOT NULL DEFAULT '{}'::jsonb,
+  event_at      timestamptz NOT NULL DEFAULT now(),
+  created_at    timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_domain_events_event_type    ON public.domain_events(event_type);
+CREATE INDEX IF NOT EXISTS idx_domain_events_event_at      ON public.domain_events(event_at DESC);
+CREATE INDEX IF NOT EXISTS idx_domain_events_user_id       ON public.domain_events(user_id);
+CREATE INDEX IF NOT EXISTS idx_domain_events_auth_user_id  ON public.domain_events(auth_user_id);
+CREATE INDEX IF NOT EXISTS idx_domain_events_payload_gin   ON public.domain_events USING gin(payload);
+
+-- =============================================================================
+-- ANALYTICS DE SUBMISSIONS (tabla de auditoría del formulario de publicación)
+-- =============================================================================
+
+-- user_id text: soporta usuarios anónimos.
+-- auth_user_id uuid: FK válido cuando el usuario está autenticado.
+-- place_id text: puede referenciar external_id de Google antes de que el local
+--   sea registrado como uuid en places; no se puede convertir a FK.
+CREATE TABLE IF NOT EXISTS public.content_submissions (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  user_id       text,
+  auth_user_id  uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+  username      text,
+
+  entry_type    text NOT NULL
+                CHECK (entry_type IN ('review', 'media', 'incognito', 'new-picada')),
+  content_type  text NOT NULL
+                CHECK (content_type IN ('review', 'photo', 'video', 'incognito', 'tip')),
+
+  is_incognito  boolean NOT NULL DEFAULT false,
+  has_media     boolean NOT NULL DEFAULT false,
+  media_kind    text CHECK (media_kind IN ('photo', 'video')),
+  has_comment   boolean NOT NULL DEFAULT false,
+  comment_length int NOT NULL DEFAULT 0,
+  rating        int CHECK (rating BETWEEN 1 AND 5),
+
+  place_id      text,
   place_name    text,
-  place_lat     double precision,
-  place_lng     double precision,
+  place_address text,
 
-  -- Incógnito: la app muestra "Foodie Fantasma 👻" en lugar del username real
-  is_incognito  boolean default false,
+  category      text,
+  tags          text[] NOT NULL DEFAULT '{}',
+  moods         text[] NOT NULL DEFAULT '{}',
 
-  -- Datos nutricionales opcionales (del scanner de IA)
-  -- { "dish": "Sandwich de Mechada", "kcal": 520, "protein": 32,
-  --   "carbs": 48, "fat": 18, "source": "AI_GENERATED" }
-  nutrition_data jsonb,
+  quality_score    int NOT NULL DEFAULT 0,
+  engagement_score int NOT NULL DEFAULT 0,
+  completeness     int NOT NULL DEFAULT 0,
 
-  -- Engagement
-  likes_count   int default 0,
-  views_count   int default 0,
+  payload   jsonb NOT NULL DEFAULT '{}'::jsonb,
+  computed  jsonb NOT NULL DEFAULT '{}'::jsonb,
 
-  created_at    timestamptz default now(),
-  updated_at    timestamptz default now()
+  created_at timestamptz NOT NULL DEFAULT now()
 );
 
-create index if not exists idx_posts_place_id   on public.posts(place_id);
-create index if not exists idx_posts_user_id    on public.posts(user_id);
-create index if not exists idx_posts_type       on public.posts(type);
-create index if not exists idx_posts_created_at on public.posts(created_at desc);
-
--- =============================================================================
--- MEDIA DE POSTS
--- =============================================================================
-
-create table if not exists public.post_media (
-  id          uuid primary key default gen_random_uuid(),
-  post_id     uuid not null references public.posts(id) on delete cascade,
-  url         text not null,
-  media_type  text not null check (media_type in ('photo','video')),
-  sort_order  int default 0,
-  created_at  timestamptz default now()
-);
-
-create index if not exists idx_post_media_post_id on public.post_media(post_id);
-
--- =============================================================================
--- GAMIFICACIÓN — Registro de puntos por acción
--- Acciones y puntos:
---   create_picada    → +15  (crear local nuevo)
---   first_photo      → +10  (primera foto real de un borrador)
---   post_review      → +5   (reseña con texto ≥ 10 chars)
---   post_media       → +8   (subir foto/video)
---   complete_draft   → +10  (completar datos faltantes de un borrador)
---   first_visit      → +3   (registrar visita a un local)
--- =============================================================================
-
-create table if not exists public.user_points (
-  id           uuid primary key default gen_random_uuid(),
-  user_id      uuid not null references auth.users(id) on delete cascade,
-  action       text not null,
-  points       int not null,
-  reference_id uuid,   -- place_id o post_id que originó los puntos
-  created_at   timestamptz default now()
-);
-
-create index if not exists idx_user_points_user_id on public.user_points(user_id);
-
--- =============================================================================
--- SOCIAL: FOLLOWS
--- =============================================================================
-
-create table if not exists public.follows (
-  id           uuid primary key default gen_random_uuid(),
-  follower_id  text not null,
-  following_id text not null,
-  created_at   timestamptz default now(),
-  unique(follower_id, following_id)
-);
-
--- =============================================================================
--- SAVED ITEMS (favoritos granulares de platos)
--- =============================================================================
-
-create table if not exists public.saved_items (
-  id           uuid primary key default gen_random_uuid(),
-  user_id      text not null,
-  menu_item_id uuid not null references public.menu_items(id) on delete cascade,
-  kind         text default 'pending',  -- 'pending' | 'favorite'
-  created_at   timestamptz default now(),
-  unique(user_id, menu_item_id)
-);
-
--- =============================================================================
--- CACHÉ Y AUDITORÍA DE DATOS EXTERNOS
--- =============================================================================
-
-create table if not exists public.place_change_log (
-  id               uuid primary key default gen_random_uuid(),
-  place_id         uuid not null references public.places(id) on delete cascade,
-  previous_payload jsonb not null,
-  current_payload  jsonb not null,
-  changed_fields   text[] default '{}',
-  detected_at      timestamptz default now()
-);
-
-create table if not exists public.place_discovery_cache (
-  id           uuid primary key default gen_random_uuid(),
-  location_key text unique not null,
-  source       text not null,
-  place_ids    uuid[] default '{}',
-  payload      jsonb not null default '[]'::jsonb,
-  fetched_at   timestamptz default now(),
-  expires_at   timestamptz not null
-);
+CREATE INDEX IF NOT EXISTS idx_content_submissions_created_at   ON public.content_submissions(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_content_submissions_user_id      ON public.content_submissions(user_id);
+CREATE INDEX IF NOT EXISTS idx_content_submissions_auth_user_id ON public.content_submissions(auth_user_id);
+CREATE INDEX IF NOT EXISTS idx_content_submissions_entry_type   ON public.content_submissions(entry_type);
+CREATE INDEX IF NOT EXISTS idx_content_submissions_content_type ON public.content_submissions(content_type);
+CREATE INDEX IF NOT EXISTS idx_content_submissions_place_name   ON public.content_submissions(place_name);
+CREATE INDEX IF NOT EXISTS idx_content_submissions_tags_gin     ON public.content_submissions USING gin(tags);
+CREATE INDEX IF NOT EXISTS idx_content_submissions_payload_gin  ON public.content_submissions USING gin(payload);
 
 -- =============================================================================
 -- FUNCIONES
 -- =============================================================================
 
--- ── Picada Score ──────────────────────────────────────────────────────────────
--- Lógica: precio bajo + rating alto + poca visibilidad = local más "picada"
-
-create or replace function public.compute_picada_score(
-  p_price_level   int,
-  p_rating        numeric,
-  p_rating_count  int
-) returns int language plpgsql immutable as $$
-declare
+-- Picada Score: precio bajo + rating alto + poca visibilidad = más "picada"
+CREATE OR REPLACE FUNCTION public.compute_picada_score(
+  p_price_level  int,
+  p_rating       numeric,
+  p_rating_count int
+) RETURNS int LANGUAGE plpgsql IMMUTABLE AS $$
+DECLARE
   score int := 50;
-begin
-  -- Precio: más barato → más picada
-  score := score + case p_price_level
-    when 1 then  25
-    when 2 then  10
-    when 3 then  -5
-    when 4 then -20
-    else 0
-  end;
+BEGIN
+  score := score + CASE p_price_level
+    WHEN 1 THEN  25
+    WHEN 2 THEN  10
+    WHEN 3 THEN  -5
+    WHEN 4 THEN -20
+    ELSE 0
+  END;
 
-  -- Rating: si existe y es alto → mejor picada
-  if p_rating is not null then
+  IF p_rating IS NOT NULL THEN
     score := score + round((p_rating - 3.0) * 10)::int;
-  end if;
+  END IF;
 
-  -- Obscuridad: pocos reviews → local más "secreto"
-  score := score + case
-    when p_rating_count is null or p_rating_count = 0 then  15
-    when p_rating_count < 10                           then  10
-    when p_rating_count < 50                           then   5
-    when p_rating_count < 200                          then   0
-    else                                                    -10
-  end;
+  score := score + CASE
+    WHEN p_rating_count IS NULL OR p_rating_count = 0 THEN  15
+    WHEN p_rating_count < 10                           THEN  10
+    WHEN p_rating_count < 50                           THEN   5
+    WHEN p_rating_count < 200                          THEN   0
+    ELSE                                                    -10
+  END;
 
-  return greatest(0, least(100, score));
-end;
+  RETURN greatest(0, least(100, score));
+END;
 $$;
 
--- ── Rating interno: recalcular al insertar/actualizar reseña ──────────────────
+-- Recomendaciones personalizadas basadas en afinidad de tags
+CREATE OR REPLACE FUNCTION public.get_personalized_recommendations(
+  p_user_id uuid,
+  p_limit   int DEFAULT 5,
+  p_city    text DEFAULT null
+)
+RETURNS TABLE (
+  place_id    uuid,
+  name        text,
+  address     text,
+  city        text,
+  rating      numeric,
+  picada_score int,
+  maps_url    text,
+  photo_url   text,
+  score       numeric,
+  reason      text
+)
+LANGUAGE sql STABLE AS $$
+WITH params AS (
+  SELECT
+    greatest(1, least(COALESCE(p_limit, 5), 20)) AS lim,
+    greatest(1, ceil(greatest(1, least(COALESCE(p_limit, 5), 20)) * 0.2)::int) AS ser_lim
+),
+user_aff AS (
+  SELECT
+    uta.tag_slug,
+    (uta.weight * (1.0 / (1.0 + (extract(day FROM now() - uta.updated_at) * 0.05))))::numeric AS eff_weight
+  FROM public.user_tag_affinity uta
+  WHERE uta.user_id = p_user_id
+  ORDER BY eff_weight DESC
+  LIMIT 10
+),
+candidate_places AS (
+  SELECT
+    p.id,
+    p.name,
+    p.address,
+    p.city,
+    p.rating,
+    p.picada_score,
+    p.maps_url,
+    CASE
+      WHEN jsonb_typeof(p.gallery) = 'array' AND jsonb_array_length(p.gallery) > 0
+        THEN p.gallery ->> 0
+      ELSE null
+    END AS photo_url,
+    sum(
+      ua.eff_weight *
+      COALESCE((seed.tag ->> 'confidence_score')::numeric, 0.5)
+    ) AS base_score
+  FROM public.places p
+  JOIN LATERAL jsonb_array_elements(
+    COALESCE(p.tagging_meta -> 'automated_seed' -> 'tags', '[]'::jsonb)
+  ) AS seed(tag) ON true
+  JOIN user_aff ua ON lower(seed.tag ->> 'slug') = lower(ua.tag_slug)
+  WHERE (p.is_active IS NULL OR p.is_active = true)
+    AND (p_city IS NULL OR p_city = '' OR p.city ILIKE ('%' || p_city || '%'))
+  GROUP BY p.id, p.name, p.address, p.city, p.rating, p.picada_score, p.maps_url, p.gallery
+),
+core_ranked AS (
+  SELECT
+    cp.id AS place_id,
+    cp.name, cp.address, cp.city, cp.rating, cp.picada_score, cp.maps_url, cp.photo_url,
+    (
+      cp.base_score
+      * greatest(1, COALESCE(cp.rating, 0))
+      * CASE
+          WHEN p_city IS NOT NULL AND p_city <> '' AND cp.city ILIKE ('%' || p_city || '%')
+          THEN 1.10 ELSE 1.00
+        END
+    )::numeric AS score,
+    'affinity'::text AS reason
+  FROM candidate_places cp
+  ORDER BY score DESC
+  LIMIT ((SELECT lim FROM params) - (SELECT ser_lim FROM params))
+),
+serendipia AS (
+  SELECT
+    p.id AS place_id,
+    p.name, p.address, p.city, p.rating, p.picada_score, p.maps_url,
+    CASE
+      WHEN jsonb_typeof(p.gallery) = 'array' AND jsonb_array_length(p.gallery) > 0
+        THEN p.gallery ->> 0
+      ELSE null
+    END AS photo_url,
+    (greatest(1, COALESCE(p.rating, 0)) * 8 + greatest(0, COALESCE(p.picada_score, 0)) * 0.2)::numeric AS score,
+    'serendipia'::text AS reason
+  FROM public.places p
+  WHERE (p.is_active IS NULL OR p.is_active = true)
+    AND (p_city IS NULL OR p_city = '' OR p.city ILIKE ('%' || p_city || '%'))
+    AND p.rating >= 4
+    AND NOT EXISTS (SELECT 1 FROM core_ranked c WHERE c.place_id = p.id)
+  ORDER BY random()
+  LIMIT (SELECT ser_lim FROM params)
+)
+SELECT * FROM core_ranked
+UNION ALL
+SELECT * FROM serendipia
+ORDER BY score DESC
+LIMIT (SELECT lim FROM params);
+$$;
 
-create or replace function public.refresh_place_rating()
-returns trigger language plpgsql security definer as $$
-begin
-  update public.places
-  set
-    internal_rating = (
-      select round(avg(rating)::numeric, 2)
-      from public.user_reviews
-      where place_id = new.place_id and rating is not null
-    ),
-    internal_rating_count = (
-      select count(*)
-      from public.user_reviews
-      where place_id = new.place_id and rating is not null
-    ),
+-- Trigger de recompensas por contribución (requiere tabla profiles)
+-- Se activa solo si profiles existe; de lo contrario no hace nada.
+CREATE OR REPLACE FUNCTION public.handle_contribution_reward()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public AS $$
+DECLARE
+  v_user_id uuid;
+  v_delta   integer := 0;
+BEGIN
+  v_user_id := nullif((to_jsonb(NEW) ->> 'user_id'), '')::uuid;
+  IF v_user_id IS NULL THEN
+    v_user_id := nullif((to_jsonb(NEW) ->> 'author_id'), '')::uuid;
+  END IF;
+  IF v_user_id IS NULL THEN RETURN NEW; END IF;
+
+  IF tg_table_name = 'posts' THEN
+    v_delta := 50;
+  ELSIF tg_table_name IN ('reviews', 'place_tags') THEN
+    v_delta := 10;
+  ELSE
+    RETURN NEW;
+  END IF;
+
+  UPDATE public.profiles
+  SET
+    points = COALESCE(points, 0) + v_delta,
+    level  = floor(sqrt((COALESCE(points, 0) + v_delta)::numeric / 100.0))::int + 1,
     updated_at = now()
-  where id = new.place_id;
-  return new;
-end;
-$$;
+  WHERE id = v_user_id;
 
-create or replace trigger trg_refresh_place_rating
-after insert or update on public.user_reviews
-for each row
-when (new.place_id is not null and new.rating is not null)
-execute function public.refresh_place_rating();
-
--- ── Match Score: cuán compatible es un local con las preferencias del usuario ──
--- Retorna 0-100. La app lo usa para ordenar resultados del feed.
---
--- Lógica de penalizaciones (decisiones de diseño importantes):
---   - Restricciones dietéticas NO cubiertas: penalización alta (40-50 pts)
---     porque mostrar un restaurante "no apto" a alguien celíaco o musulmán
---     es peor que no mostrarlo. Son necesidades reales, no preferencias.
---   - Restricciones religiosas: penalización máxima (50 pts) por el mismo motivo.
---   - Gustos no coincidentes: penalización leve (5 pts) — son opcionales.
---   - Precio fuera de rango: penalización media (15 pts).
-
-create or replace function public.place_match_score(
-  p_place_id uuid,
-  p_user_id  uuid
-) returns int language plpgsql stable as $$
-declare
-  prefs  public.user_preferences%rowtype;
-  place  public.places%rowtype;
-  score  int := 50;
-  bonus  int := 0;
-  penalty int := 0;
-begin
-  select * into prefs from public.user_preferences where user_id = p_user_id;
-  select * into place from public.places           where id = p_place_id;
-
-  if not found then return 50; end if;
-
-  -- ── Bonus: coincidencia de gustos (cuisines y categoría) ─────────────────
-  if prefs.likes && place.cuisines then
-    bonus := bonus + 20;
-  end if;
-  if prefs.likes && place.nutrition_categories then
-    bonus := bonus + 10;
-  end if;
-
-  -- ── Bonus: experiencias buscadas ─────────────────────────────────────────
-  if prefs.experiences && place.experiences then
-    bonus := bonus + 15;
-  end if;
-
-  -- ── Bonus: alta puntuación del local ─────────────────────────────────────
-  if place.rating is not null and place.rating >= 4.5 then
-    bonus := bonus + 8;
-  end if;
-
-  -- ── Penalización: restricciones dietéticas no satisfechas ────────────────
-  if 'sin_gluten'  = any(prefs.restrictions) and not place.is_gluten_free_friendly then
-    penalty := penalty + 45;
-  end if;
-  if 'vegano'      = any(prefs.restrictions) and not place.is_vegan_friendly then
-    penalty := penalty + 45;
-  end if;
-  if 'vegetariano' = any(prefs.restrictions) and not place.is_vegetarian_friendly then
-    penalty := penalty + 35;
-  end if;
-  if 'keto'        = any(prefs.restrictions) and not place.is_keto_friendly then
-    penalty := penalty + 20;
-  end if;
-  if 'sin_lactosa' = any(prefs.restrictions) and not place.is_lactose_free then
-    penalty := penalty + 15;
-  end if;
-
-  -- ── Penalización: restricciones religiosas ────────────────────────────────
-  if prefs.religion = 'muslim' and not place.is_halal then
-    penalty := penalty + 50;
-  end if;
-  if prefs.religion = 'jewish' and not place.is_kosher then
-    penalty := penalty + 50;
-  end if;
-
-  -- ── Precio fuera del rango preferido ─────────────────────────────────────
-  if place.price_level is not null then
-    if place.price_level < prefs.min_price or place.price_level > prefs.max_price then
-      penalty := penalty + 15;
-    else
-      bonus := bonus + 5;
-    end if;
-  end if;
-
-  return greatest(0, least(100, score + bonus - penalty));
-end;
+  RETURN NEW;
+END;
 $$;
 
 -- =============================================================================
 -- VISTAS
 -- =============================================================================
 
--- Leaderboard público de contribuidores
-create or replace view public.user_leaderboard as
-select
-  p.id,
-  p.username,
-  p.avatar_url,
-  p.level,
-  coalesce(sum(up.points), 0)::int as total_points,
-  count(distinct up.id)::int        as actions_count
-from public.profiles p
-left join public.user_points up on up.user_id = p.id
-where p.is_public = true
-group by p.id, p.username, p.avatar_url, p.level
-order by total_points desc;
+-- Leaderboard basado en eventos (la fuente de verdad del ranking)
+CREATE OR REPLACE VIEW public.user_event_leaderboard AS
+SELECT
+  COALESCE(NULLIF(de.user_id, ''), 'anon') AS user_id,
+  COALESCE(max(NULLIF(de.username, '')), 'foodie') AS username,
+  count(*) FILTER (WHERE de.event_type = 'USER_REVIEWED')::int           AS reviews_count,
+  count(*) FILTER (WHERE de.event_type = 'USER_VISITED')::int            AS visits_count,
+  count(*) FILTER (WHERE de.event_type = 'USER_VOTED'
+    AND COALESCE((de.payload ->> 'voted')::boolean, true))::int          AS votes_count,
+  sum(greatest(0, COALESCE((de.payload ->> 'xp')::int, 0)))::int        AS total_xp,
+  (
+    sum(greatest(0, COALESCE((de.payload ->> 'xp')::int, 0))) +
+    count(*) FILTER (WHERE de.event_type = 'USER_REVIEWED') * 25 +
+    count(*) FILTER (WHERE de.event_type = 'USER_VISITED') * 8 +
+    count(*) FILTER (WHERE de.event_type = 'USER_VOTED'
+      AND COALESCE((de.payload ->> 'voted')::boolean, true)) * 4
+  )::int AS score
+FROM public.domain_events de
+GROUP BY COALESCE(NULLIF(de.user_id, ''), 'anon')
+ORDER BY score DESC, total_xp DESC;
 
--- Feed de posts (no expone user_id de posts incógnito)
-create or replace view public.posts_feed as
-select
-  po.id,
-  po.place_id,
-  po.type,
-  po.content,
-  po.rating,
-  po.mood_tags,
-  po.place_name,
-  po.is_incognito,
-  po.nutrition_data,
-  po.likes_count,
-  po.views_count,
-  po.created_at,
-  -- Incógnito: mostrar solo que existe un autor, sin identificarlo
-  case when po.is_incognito then null else po.user_id end as user_id,
-  case when po.is_incognito then 'Foodie Fantasma' else pr.username end as author_name,
-  case when po.is_incognito then null else pr.avatar_url end as author_avatar,
-  pl.name    as place_name_linked,
-  pl.commune as place_commune,
-  pl.lat     as place_lat,
-  pl.lng     as place_lng
-from public.posts po
-left join public.profiles pr on pr.id = po.user_id
-left join public.places   pl on pl.id = po.place_id
-order by po.created_at desc;
+-- Ranking de locales por actividad comunitaria
+CREATE OR REPLACE VIEW public.picada_event_ranking AS
+WITH votes AS (
+  SELECT
+    COALESCE(
+      NULLIF(de.payload ->> 'picadaId', ''),
+      NULLIF(de.payload ->> 'placeId', ''),
+      NULLIF(de.payload ->> 'placeName', ''),
+      'unknown'
+    ) AS picada_id,
+    sum(
+      CASE
+        WHEN de.event_type = 'USER_VOTED' AND COALESCE((de.payload ->> 'voted')::boolean, true) THEN 1
+        WHEN de.event_type = 'USER_VOTED' AND NOT COALESCE((de.payload ->> 'voted')::boolean, true) THEN -1
+        ELSE 0
+      END
+    )::int AS votes_net,
+    count(*) FILTER (WHERE de.event_type = 'USER_VISITED')::int  AS visits_count,
+    count(*) FILTER (WHERE de.event_type = 'USER_REVIEWED')::int AS reviews_count
+  FROM public.domain_events de
+  WHERE de.event_type IN ('USER_VOTED', 'USER_VISITED', 'USER_REVIEWED')
+  GROUP BY 1
+)
+SELECT
+  picada_id,
+  greatest(0, votes_net)   AS community_votes,
+  visits_count,
+  reviews_count,
+  (greatest(0, votes_net) * 9 + reviews_count * 6 + visits_count * 3)::int AS ranking_score
+FROM votes
+WHERE picada_id <> 'unknown'
+ORDER BY ranking_score DESC, community_votes DESC;
 
 -- =============================================================================
 -- ROW LEVEL SECURITY
 -- =============================================================================
 
-alter table public.profiles            enable row level security;
-alter table public.user_preferences    enable row level security;
-alter table public.user_favorites      enable row level security;
-alter table public.user_reviews        enable row level security;
-alter table public.user_visits         enable row level security;
-alter table public.places              enable row level security;
-alter table public.menu_items          enable row level security;
-alter table public.posts               enable row level security;
-alter table public.post_media          enable row level security;
-alter table public.user_points         enable row level security;
-alter table public.follows             enable row level security;
-alter table public.saved_items         enable row level security;
-alter table public.place_change_log    enable row level security;
-alter table public.place_discovery_cache enable row level security;
+ALTER TABLE public.places                ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.place_change_log      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.place_discovery_cache ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.tag_catalog           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.tag_relations_stats   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.tag_relation_user_pair ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_tag_affinity     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.domain_events         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.content_submissions   ENABLE ROW LEVEL SECURITY;
 
--- ── Profiles ─────────────────────────────────────────────────────────────────
+-- ── places ───────────────────────────────────────────────────────────────────
 
-create policy if not exists "profiles_public_read"
-on public.profiles for select
-using (is_public = true or auth.uid() = id);
+CREATE POLICY IF NOT EXISTS "places_active_public_read" ON public.places
+  FOR SELECT USING (status = 'active' OR auth.uid() = submitted_by);
 
-create policy if not exists "profiles_owner_write"
-on public.profiles for all
-using (auth.uid() = id)
-with check (auth.uid() = id);
+CREATE POLICY IF NOT EXISTS "places_user_insert" ON public.places
+  FOR INSERT WITH CHECK (auth.uid() = submitted_by);
 
--- ── User preferences ─────────────────────────────────────────────────────────
+CREATE POLICY IF NOT EXISTS "places_owner_update" ON public.places
+  FOR UPDATE USING (auth.uid() = submitted_by) WITH CHECK (auth.uid() = submitted_by);
 
-create policy if not exists "prefs_owner_only"
-on public.user_preferences for all
-using (auth.uid() = user_id)
-with check (auth.uid() = user_id);
+-- ── place_change_log ─────────────────────────────────────────────────────────
 
--- ── Favorites ────────────────────────────────────────────────────────────────
+CREATE POLICY IF NOT EXISTS "place_change_log_read" ON public.place_change_log
+  FOR SELECT USING (true);
 
-create policy if not exists "favorites_public_if_profile_public"
-on public.user_favorites for select
-using (
-  auth.uid() = user_id or exists (
-    select 1 from public.profiles p
-    where p.id = user_id and p.is_public = true
-  )
-);
+CREATE POLICY IF NOT EXISTS "place_change_log_no_client_write" ON public.place_change_log
+  FOR ALL USING (false) WITH CHECK (false);
 
-create policy if not exists "favorites_owner_write"
-on public.user_favorites for all
-using (auth.uid() = user_id)
-with check (auth.uid() = user_id);
+-- ── place_discovery_cache ─────────────────────────────────────────────────────
 
--- ── Reviews ──────────────────────────────────────────────────────────────────
+CREATE POLICY IF NOT EXISTS "place_discovery_cache_read" ON public.place_discovery_cache
+  FOR SELECT USING (true);
 
-create policy if not exists "reviews_public_if_profile_public"
-on public.user_reviews for select
-using (
-  auth.uid() = user_id or exists (
-    select 1 from public.profiles p
-    where p.id = user_id and p.is_public = true
-  )
-);
+CREATE POLICY IF NOT EXISTS "place_discovery_cache_no_client_write" ON public.place_discovery_cache
+  FOR ALL USING (false) WITH CHECK (false);
 
-create policy if not exists "reviews_owner_write"
-on public.user_reviews for all
-using (auth.uid() = user_id)
-with check (auth.uid() = user_id);
+-- ── tag_catalog ───────────────────────────────────────────────────────────────
 
--- ── Visits ───────────────────────────────────────────────────────────────────
+CREATE POLICY IF NOT EXISTS "tag_catalog_public_read" ON public.tag_catalog
+  FOR SELECT USING (true);
 
-create policy if not exists "visits_public_if_profile_public"
-on public.user_visits for select
-using (
-  auth.uid() = user_id or exists (
-    select 1 from public.profiles p
-    where p.id = user_id and p.is_public = true
-  )
-);
+CREATE POLICY IF NOT EXISTS "tag_catalog_no_client_write" ON public.tag_catalog
+  FOR ALL USING (false) WITH CHECK (false);
 
-create policy if not exists "visits_owner_write"
-on public.user_visits for all
-using (auth.uid() = user_id)
-with check (auth.uid() = user_id);
+-- ── tag_relations_stats ───────────────────────────────────────────────────────
 
--- ── Places (locales) ─────────────────────────────────────────────────────────
--- Locales activos: lectura pública para todos.
--- Borradores (status='draft'): visibles solo para su creador.
+CREATE POLICY IF NOT EXISTS "tag_relations_read_all" ON public.tag_relations_stats
+  FOR SELECT USING (true);
 
-create policy if not exists "places_active_public_read"
-on public.places for select
-using (
-  status = 'active'
-  or auth.uid() = submitted_by
-);
+CREATE POLICY IF NOT EXISTS "tag_relations_no_client_write" ON public.tag_relations_stats
+  FOR ALL USING (false) WITH CHECK (false);
 
-create policy if not exists "places_user_insert"
-on public.places for insert
-with check (auth.uid() = submitted_by);
+-- ── tag_relation_user_pair ────────────────────────────────────────────────────
 
-create policy if not exists "places_owner_update"
-on public.places for update
-using (auth.uid() = submitted_by)
-with check (auth.uid() = submitted_by);
+CREATE POLICY IF NOT EXISTS "tag_relation_user_pair_read" ON public.tag_relation_user_pair
+  FOR SELECT USING (true);
 
--- ── Menu items ───────────────────────────────────────────────────────────────
+CREATE POLICY IF NOT EXISTS "tag_relation_user_pair_no_client_write" ON public.tag_relation_user_pair
+  FOR ALL USING (false) WITH CHECK (false);
 
-create policy if not exists "menu_items_public_read"
-on public.menu_items for select
-using (true);
+-- ── user_tag_affinity ─────────────────────────────────────────────────────────
 
-create policy if not exists "menu_items_no_client_write"
-on public.menu_items for all
-using (false)
-with check (false);
+CREATE POLICY IF NOT EXISTS "user_tag_affinity_read_own" ON public.user_tag_affinity
+  FOR SELECT TO authenticated USING (auth.uid() = user_id);
 
--- ── Posts ────────────────────────────────────────────────────────────────────
--- Lectura pública: usa la vista posts_feed que ya filtra el user_id incógnito.
+CREATE POLICY IF NOT EXISTS "user_tag_affinity_insert_own" ON public.user_tag_affinity
+  FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
 
-create policy if not exists "posts_public_read"
-on public.posts for select
-using (true);
+CREATE POLICY IF NOT EXISTS "user_tag_affinity_update_own" ON public.user_tag_affinity
+  FOR UPDATE TO authenticated
+  USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
-create policy if not exists "posts_owner_insert"
-on public.posts for insert
-with check (auth.uid() = user_id or is_incognito = true);
+-- ── domain_events ─────────────────────────────────────────────────────────────
 
-create policy if not exists "posts_owner_update"
-on public.posts for update
-using (auth.uid() = user_id)
-with check (auth.uid() = user_id);
+CREATE POLICY IF NOT EXISTS "domain_events_public_read" ON public.domain_events
+  FOR SELECT USING (true);
 
-create policy if not exists "posts_owner_delete"
-on public.posts for delete
-using (auth.uid() = user_id);
+CREATE POLICY IF NOT EXISTS "domain_events_no_client_write" ON public.domain_events
+  FOR ALL USING (false) WITH CHECK (false);
 
--- ── Post media ───────────────────────────────────────────────────────────────
+-- ── content_submissions ───────────────────────────────────────────────────────
 
-create policy if not exists "post_media_public_read"
-on public.post_media for select
-using (true);
+CREATE POLICY IF NOT EXISTS "content_submissions_read_authenticated" ON public.content_submissions
+  FOR SELECT USING (auth.role() = 'authenticated');
 
-create policy if not exists "post_media_owner_write"
-on public.post_media for all
-using (
-  exists (
-    select 1 from public.posts p
-    where p.id = post_id and p.user_id = auth.uid()
-  )
-);
-
--- ── User points ──────────────────────────────────────────────────────────────
-
-create policy if not exists "points_owner_read"
-on public.user_points for select
-using (auth.uid() = user_id);
-
-create policy if not exists "points_service_insert"
-on public.user_points for insert
-with check (auth.uid() = user_id);
-
--- ── Follows ──────────────────────────────────────────────────────────────────
-
-create policy if not exists "follows_public_read"
-on public.follows for select
-using (true);
-
-create policy if not exists "follows_no_client_write"
-on public.follows for all
-using (false)
-with check (false);
-
--- ── Saved items ──────────────────────────────────────────────────────────────
-
-create policy if not exists "saved_items_public_read"
-on public.saved_items for select
-using (true);
-
-create policy if not exists "saved_items_no_client_write"
-on public.saved_items for all
-using (false)
-with check (false);
-
--- ── Caché y auditoría ────────────────────────────────────────────────────────
-
-create policy if not exists "place_change_log_read"
-on public.place_change_log for select
-using (true);
-
-create policy if not exists "place_change_log_no_client_write"
-on public.place_change_log for all
-using (false)
-with check (false);
-
-create policy if not exists "place_discovery_cache_read"
-on public.place_discovery_cache for select
-using (true);
-
-create policy if not exists "place_discovery_cache_no_client_write"
-on public.place_discovery_cache for all
-using (false)
-with check (false);
+CREATE POLICY IF NOT EXISTS "content_submissions_no_client_write" ON public.content_submissions
+  FOR ALL USING (false) WITH CHECK (false);
 
 -- =============================================================================
 -- STORAGE
 -- =============================================================================
 
-insert into storage.buckets (id, name, public)
-values ('place-gallery', 'place-gallery', true)
-on conflict (id) do nothing;
-
--- =============================================================================
--- PHASE 3.2 — EVENTOS DE DOMINIO + RANKING EVENT-DRIVEN
--- =============================================================================
-
-create table if not exists public.domain_events (
-  id uuid primary key default gen_random_uuid(),
-  event_type text not null check (event_type in ('CONTENT_CREATED', 'USER_VOTED', 'USER_REVIEWED', 'USER_SAVED', 'USER_VISITED', 'USER_SCANNED')),
-  user_id text,
-  username text,
-  payload jsonb not null default '{}'::jsonb,
-  event_at timestamptz not null default now(),
-  created_at timestamptz not null default now()
-);
-
-create index if not exists idx_domain_events_event_type on public.domain_events(event_type);
-create index if not exists idx_domain_events_event_at on public.domain_events(event_at desc);
-create index if not exists idx_domain_events_user_id on public.domain_events(user_id);
-create index if not exists idx_domain_events_payload_gin on public.domain_events using gin(payload);
-create index if not exists idx_posts_quality_score on public.posts (((coalesce((nutrition_data->>'quality_score')::int, 0)))) where nutrition_data is not null;
-
-alter table public.domain_events enable row level security;
-
-create policy if not exists "domain_events_public_read"
-on public.domain_events for select
-using (true);
-
-create policy if not exists "domain_events_no_client_write"
-on public.domain_events for all
-using (false)
-with check (false);
-
-create or replace view public.user_event_leaderboard as
-select
-  coalesce(nullif(de.user_id, ''), 'anon') as user_id,
-  coalesce(max(nullif(de.username, '')), 'foodie') as username,
-  count(*) filter (where de.event_type = 'USER_REVIEWED')::int as reviews_count,
-  count(*) filter (where de.event_type = 'USER_VISITED')::int as visits_count,
-  count(*) filter (where de.event_type = 'USER_VOTED' and coalesce((de.payload->>'voted')::boolean, true))::int as votes_count,
-  sum(greatest(0, coalesce((de.payload->>'xp')::int, 0)))::int as total_xp,
-  (
-    sum(greatest(0, coalesce((de.payload->>'xp')::int, 0))) +
-    count(*) filter (where de.event_type = 'USER_REVIEWED') * 25 +
-    count(*) filter (where de.event_type = 'USER_VISITED') * 8 +
-    count(*) filter (where de.event_type = 'USER_VOTED' and coalesce((de.payload->>'voted')::boolean, true)) * 4
-  )::int as score
-from public.domain_events de
-group by coalesce(nullif(de.user_id, ''), 'anon')
-order by score desc, total_xp desc;
-
-create or replace view public.picada_event_ranking as
-with votes as (
-  select
-    coalesce(nullif(de.payload->>'picadaId', ''), nullif(de.payload->>'placeId', ''), nullif(de.payload->>'placeName', ''), 'unknown') as picada_id,
-    sum(
-      case
-        when de.event_type = 'USER_VOTED' and coalesce((de.payload->>'voted')::boolean, true) then 1
-        when de.event_type = 'USER_VOTED' and coalesce((de.payload->>'voted')::boolean, true) = false then -1
-        else 0
-      end
-    )::int as votes_net,
-    count(*) filter (where de.event_type = 'USER_VISITED')::int as visits_count,
-    count(*) filter (where de.event_type = 'USER_REVIEWED')::int as reviews_count
-  from public.domain_events de
-  where de.event_type in ('USER_VOTED', 'USER_VISITED', 'USER_REVIEWED')
-  group by coalesce(nullif(de.payload->>'picadaId', ''), nullif(de.payload->>'placeId', ''), nullif(de.payload->>'placeName', ''), 'unknown')
-)
-select
-  picada_id,
-  greatest(0, votes_net) as community_votes,
-  visits_count,
-  reviews_count,
-  (
-    greatest(0, votes_net) * 9 +
-    reviews_count * 6 +
-    visits_count * 3
-  )::int as ranking_score
-from votes
-where picada_id <> 'unknown'
-order by ranking_score desc, community_votes desc;
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('place-gallery', 'place-gallery', true)
+ON CONFLICT (id) DO NOTHING;

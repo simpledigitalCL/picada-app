@@ -40,7 +40,20 @@
       "mcp__linear-server__save_project",
       "mcp__linear-server__list_issues",
       "Bash(sed -i \"s|import\\('@/lib/gamification'\\)|import\\('@/lib/gamification/core'\\)|g\" /home/debian/documents/Github/picada-app/lib/auth/identity.ts)",
-      "Bash(sed -i \"s|import\\('@/lib/restaurants'\\)|import\\('@/lib/places/restaurants'\\)|g\" /home/debian/documents/Github/picada-app/components/profile-feedie-chrome.tsx /home/debian/documents/Github/picada-app/components/profile-view.tsx)"
+      "Bash(sed -i \"s|import\\('@/lib/restaurants'\\)|import\\('@/lib/places/restaurants'\\)|g\" /home/debian/documents/Github/picada-app/components/profile-feedie-chrome.tsx /home/debian/documents/Github/picada-app/components/profile-view.tsx)",
+      "mcp__supabase__list_projects",
+      "mcp__supabase__get_project_url",
+      "mcp__supabase__get_publishable_keys",
+      "Bash(pkill -f \"next dev\")",
+      "Bash(echo \"PID: $!\")",
+      "mcp__linear-server__get_issue",
+      "mcp__supabase__list_tables",
+      "mcp__supabase__execute_sql",
+      "mcp__supabase__apply_migration"
     ]
-  }
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "supabase"
+  ]
 }
