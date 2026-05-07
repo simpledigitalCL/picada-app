@@ -523,6 +523,8 @@ export default function Home() {
       <SonnerToaster />
       <AchievementToast />
 
+      <PasswordRecoveryDialog open={passwordRecovery} onClose={() => setPasswordRecovery(false)} />
+
       <Sheet open={!!selected} onOpenChange={open => !open && !pickerOpen && !pickerBlock && handleClose()}>
         <SheetContent
           side="bottom"
@@ -544,6 +546,86 @@ export default function Home() {
         </SheetContent>
       </Sheet>
     </div>
+  )
+}
+
+function PasswordRecoveryDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const supabase = getSupabaseBrowserClient()
+  const [password, setPassword] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [status, setStatus] = useState<{ msg: string; error?: boolean } | null>(null)
+  const [done, setDone] = useState(false)
+  const passwordRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (open) {
+      setPassword(''); setConfirm(''); setStatus(null); setDone(false)
+      setTimeout(() => passwordRef.current?.focus(), 100)
+    }
+  }, [open])
+
+  const handleSubmit = async () => {
+    if (password.length < 8) { setStatus({ msg: 'La contraseña debe tener al menos 8 caracteres.', error: true }); return }
+    if (password !== confirm) { setStatus({ msg: 'Las contraseñas no coinciden.', error: true }); return }
+    if (!supabase) return
+    setLoading(true)
+    const { error } = await supabase.auth.updateUser({ password })
+    setLoading(false)
+    if (error) {
+      setStatus({ msg: error.message, error: true })
+    } else {
+      setDone(true)
+      setStatus({ msg: '¡Contraseña actualizada! Ya puedes iniciar sesión.' })
+      setTimeout(onClose, 2500)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={v => !v && onClose()}>
+      <DialogContent className="max-w-sm rounded-2xl">
+        <DialogHeader>
+          <DialogTitle className="text-base">Nueva contraseña</DialogTitle>
+        </DialogHeader>
+        {done ? (
+          <div className="py-6 text-center space-y-2">
+            <p className="text-3xl">✅</p>
+            <p className="text-sm font-semibold">¡Contraseña actualizada!</p>
+            <p className="text-xs text-muted-foreground">Ya puedes iniciar sesión con tu nueva contraseña.</p>
+          </div>
+        ) : (
+          <div className="space-y-3 pt-1">
+            <Input
+              ref={passwordRef}
+              type="password"
+              placeholder="Nueva contraseña (mín. 8 caracteres)"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleSubmit()}
+            />
+            <Input
+              type="password"
+              placeholder="Confirmar contraseña"
+              value={confirm}
+              onChange={e => setConfirm(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleSubmit()}
+            />
+            {status && (
+              <p className={`text-xs ${status.error ? 'text-destructive' : 'text-muted-foreground'}`}>
+                {status.msg}
+              </p>
+            )}
+            <Button
+              className="w-full bg-orange-500 hover:bg-orange-600 text-white"
+              onClick={handleSubmit}
+              disabled={loading}
+            >
+              {loading ? 'Guardando...' : 'Guardar contraseña'}
+            </Button>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   )
 }
 

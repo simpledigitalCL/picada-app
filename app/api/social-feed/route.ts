@@ -4,6 +4,7 @@ import { placeTextMatchesLocation } from '@/lib/location/query-match'
 
 export type SocialPost = {
   id: string
+  user_id: string
   username: string
   place_name: string | null
   content: string | null
@@ -33,7 +34,7 @@ export async function GET(req: Request) {
 
   let query = supabase
     .from('posts')
-    .select('id, place_name, content, rating, type, mood_tags, is_incognito, nutrition_data, created_at')
+    .select('id, user_id, place_name, content, rating, type, mood_tags, is_incognito, nutrition_data, created_at')
     .eq('is_incognito', false)
     .order('created_at', { ascending: false })
     .range(0, fetchCap - 1)
@@ -50,6 +51,19 @@ export async function GET(req: Request) {
 
   if (error) return NextResponse.json({ posts: [] })
 
+  // Batch-fetch usernames from profiles for all post authors
+  const userIds = [...new Set((data || []).map(r => r.user_id).filter(Boolean))]
+  const profileByUserId = new Map<string, string>()
+  if (userIds.length > 0) {
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('id, username')
+      .in('id', userIds)
+    for (const p of profiles || []) {
+      if (p.username) profileByUserId.set(p.id, p.username)
+    }
+  }
+
   const posts: SocialPost[] = (data || []).map(row => {
     const nd = (row.nutrition_data || {}) as Record<string, unknown>
     const payload = (nd.original_payload || {}) as Record<string, unknown>
@@ -57,8 +71,11 @@ export async function GET(req: Request) {
     const media = (payload.media || {}) as Record<string, string | null>
     const entryType = String(nd.entryType || (payload.entry) || '')
 
+    // Prioridad: perfil actual > payload guardado > fallback generado
     const username =
-      String(user.username || '').trim() || `foodie_${String(row.id).slice(0, 4)}`
+      profileByUserId.get(row.user_id) ||
+      String(user.username || '').trim() ||
+      `foodie_${String(row.id).slice(0, 4)}`
 
     let mediaUrl: string | null = null
     const rawUrl = String(media.url || '')
@@ -66,6 +83,7 @@ export async function GET(req: Request) {
 
     return {
       id: row.id,
+      user_id: row.user_id,
       username,
       place_name: row.place_name || null,
       content: row.content || null,

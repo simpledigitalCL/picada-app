@@ -51,7 +51,9 @@
       "mcp__supabase__execute_sql",
       "mcp__supabase__apply_migration",
       "Bash(node -e \"require\\('fs'\\).readFileSync\\('/home/debian/documents/Github/picada-app/components/post-form/steps/LocationStep.tsx','utf8'\\).split\\('\\\\n'\\).slice\\(0,5\\).forEach\\(\\(l,i\\)=>console.log\\(i+1,l\\)\\)\")",
-      "mcp__supabase__list_migrations"
+      "mcp__supabase__list_migrations",
+      "Bash(grep -n \"AchievementToast\\\\|SonnerToaster\\\\|</div>$\" /Users/inter-mac-602/Documents/GitHub/picada-app/app/page.tsx)",
+      "Bash(grep -n \"AllAchievementsSheet\\\\|</div>$\" /Users/inter-mac-602/Documents/GitHub/picada-app/components/views/profile-feedie-chrome.tsx)"
     ]
   },
   "enableAllProjectMcpServers": true,

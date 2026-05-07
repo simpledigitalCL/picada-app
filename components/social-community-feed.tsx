@@ -251,14 +251,42 @@ function PostCard({
     <article className="border-b border-orange-100/60 bg-background">
       {/* Header */}
       <div className="flex items-center gap-2.5 px-4 py-3">
-        <Avatar className="size-10 ring-2 ring-orange-100">
-          <AvatarFallback className="bg-gradient-to-br from-orange-400 to-amber-300 text-white font-bold text-sm">
-            {postUsername.slice(0, 2).toUpperCase()}
-          </AvatarFallback>
-        </Avatar>
+        <button
+          type="button"
+          disabled={isOwn}
+          className="shrink-0 disabled:cursor-default"
+          onClick={() => {
+            if (isOwn) return
+            const userId = !isLocal ? (post as SocialPost).user_id : null
+            if (!userId) return
+            window.dispatchEvent(new CustomEvent('picada:open-user-profile', {
+              detail: { userId, username: postUsername },
+            }))
+          }}
+        >
+          <Avatar className="size-10 ring-2 ring-orange-100">
+            <AvatarFallback className="bg-gradient-to-br from-orange-400 to-amber-300 text-white font-bold text-sm">
+              {postUsername.slice(0, 2).toUpperCase()}
+            </AvatarFallback>
+          </Avatar>
+        </button>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
-            <p className="text-sm font-bold truncate">{postUsername}</p>
+            <button
+              type="button"
+              disabled={isOwn}
+              className="text-sm font-bold truncate disabled:cursor-default hover:underline disabled:no-underline"
+              onClick={() => {
+                if (isOwn) return
+                const userId = !isLocal ? (post as SocialPost).user_id : null
+                if (!userId) return
+                window.dispatchEvent(new CustomEvent('picada:open-user-profile', {
+                  detail: { userId, username: postUsername },
+                }))
+              }}
+            >
+              {postUsername}
+            </button>
             {isOwn && <Badge variant="secondary" className="text-[9px] px-1.5 py-0 h-4">Tú</Badge>}
           </div>
           {placeName && (

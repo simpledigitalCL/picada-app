@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Image from 'next/image'
 import {
   Bell,
@@ -30,6 +30,8 @@ import { getAllAchievementProgress, type FeaturedAchievement, type AchievementPr
 import { cn } from '@/lib/utils'
 import { SocialCommunityFeed } from '@/components/social-community-feed'
 import { loadCollections, type UserCollection } from '@/lib/social/collections'
+import { getSupabaseBrowserClient } from '@/lib/supabase'
+import { UserProfileSheet } from '@/components/user-profile-sheet'
 
 // ─── Estilos rareza ───────────────────────────────────────────────────────────
 const RARITY_PILL: Record<Rarity, { bg: string; text: string; label: string }> = {
@@ -247,12 +249,7 @@ const MOCK_CHATS = [
   { id: 3, name: 'Ana López', avatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=100&h=100&fit=crop', lastMessage: 'Te pasé el mapa por WhatsApp', time: '1h', unread: 1 },
 ]
 
-const MOCK_PROFILES = [
-  { handle: 'maria_foodie', name: 'María G.', avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=80&h=80&fit=crop' },
-  { handle: 'carlos_picadas', name: 'Carlos R.', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=80&h=80&fit=crop' },
-  { handle: 'foodie_cl', name: 'Diego M.', avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=80&h=80&fit=crop' },
-  { handle: 'sabor_stgo', name: 'Laura P.', avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=80&h=80&fit=crop' },
-]
+type SearchProfile = { id: string; username: string; avatar_url: string | null }
 
 // ─── Collections view (Guardados) ────────────────────────────────────────────
 
@@ -433,29 +430,47 @@ export function ProfileFeedieChrome({
   const [messagesOpen, setMessagesOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<SearchProfile[]>([])
+  const [searchLoading, setSearchLoading] = useState(false)
   const [achievementsSheetOpen, setAchievementsSheetOpen] = useState(false)
   const [achievementItems, setAchievementItems] = useState<AchievementItem[]>([])
+  const [profileSheetUserId, setProfileSheetUserId] = useState<string | null>(null)
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     getAllAchievementProgress().then(setAchievementItems).catch(() => null)
     const refresh = () => getAllAchievementProgress().then(setAchievementItems).catch(() => null)
     window.addEventListener('picada:achievement-equipped', refresh)
     window.addEventListener('picada:show-reward-modal', refresh)
+    const onOpenProfile = (e: Event) => {
+      const { userId } = (e as CustomEvent<{ userId: string }>).detail
+      if (userId) setProfileSheetUserId(userId)
+    }
+    window.addEventListener('picada:open-user-profile', onOpenProfile)
     return () => {
       window.removeEventListener('picada:achievement-equipped', refresh)
       window.removeEventListener('picada:show-reward-modal', refresh)
+      window.removeEventListener('picada:open-user-profile', onOpenProfile)
     }
   }, [])
 
-  const filteredProfiles = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase()
-    if (!q) return MOCK_PROFILES
-    return MOCK_PROFILES.filter(
-      p => p.handle.toLowerCase().includes(q) || p.name.toLowerCase().includes(q),
-    )
-  }, [searchQuery])
-
-  const unlockedBadges = badges.filter(b => b.unlocked)
+  const handleSearchChange = useCallback((q: string) => {
+    setSearchQuery(q)
+    if (searchTimer.current) clearTimeout(searchTimer.current)
+    if (!q.trim()) { setSearchResults([]); return }
+    setSearchLoading(true)
+    searchTimer.current = setTimeout(async () => {
+      const supabase = getSupabaseBrowserClient()
+      if (!supabase) { setSearchLoading(false); return }
+      const { data } = await supabase
+        .from('profiles')
+        .select('id, username, avatar_url')
+        .ilike('username', `%${q.trim()}%`)
+        .limit(10)
+      setSearchResults((data as SearchProfile[]) ?? [])
+      setSearchLoading(false)
+    }, 300)
+  }, [])
 
   return (
     <div className="space-y-0 -mx-4">
@@ -480,32 +495,43 @@ export function ProfileFeedieChrome({
                 <div className="border-b border-orange-100/80 p-2.5 bg-orange-50/40">
                   <Input
                     value={searchQuery}
-                    onChange={e => setSearchQuery(e.target.value)}
-                    placeholder="Buscar @usuario o nombre…"
+                    onChange={e => handleSearchChange(e.target.value)}
+                    placeholder="Buscar @usuario…"
                     className="h-9 rounded-xl border-orange-200/80 bg-white"
+                    autoFocus
                   />
                 </div>
                 <div className="max-h-64 overflow-y-auto p-1.5">
-                  <p className="px-2 py-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                    Comunidad (demo)
-                  </p>
-                  {filteredProfiles.map(p => (
+                  {searchLoading && (
+                    <p className="px-3 py-3 text-center text-xs text-muted-foreground">Buscando…</p>
+                  )}
+                  {!searchLoading && searchQuery && searchResults.length === 0 && (
+                    <p className="px-3 py-4 text-center text-xs text-muted-foreground">Sin resultados para "{searchQuery}"</p>
+                  )}
+                  {!searchQuery && (
+                    <p className="px-3 py-3 text-center text-xs text-muted-foreground">Escribe para buscar usuarios</p>
+                  )}
+                  {searchResults.map(p => (
                     <button
-                      key={p.handle}
+                      key={p.id}
                       type="button"
                       className="flex w-full items-center gap-2.5 rounded-xl px-2 py-2 text-left transition hover:bg-orange-50"
-                      onClick={() => setSearchOpen(false)}
+                      onClick={() => {
+                        setSearchOpen(false)
+                        setProfileSheetUserId(p.id)
+                      }}
                     >
-                      <Image src={p.avatar} alt="" width={40} height={40} className="size-10 rounded-full object-cover ring-2 ring-orange-100" />
+                      <div className="size-10 rounded-full bg-gradient-to-br from-orange-400 to-amber-300 flex items-center justify-center text-white font-bold text-sm ring-2 ring-orange-100 shrink-0">
+                        {p.avatar_url
+                          ? <img src={p.avatar_url} alt="" className="size-full rounded-full object-cover" />
+                          : (p.username || '?').slice(0, 2).toUpperCase()
+                        }
+                      </div>
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-semibold">{p.name}</p>
-                        <p className="truncate text-xs text-muted-foreground">@{p.handle}</p>
+                        <p className="truncate text-sm font-semibold">@{p.username}</p>
                       </div>
                     </button>
                   ))}
-                  {filteredProfiles.length === 0 ? (
-                    <p className="px-3 py-4 text-center text-xs text-muted-foreground">Sin resultados de demo</p>
-                  ) : null}
                 </div>
               </PopoverContent>
             </Popover>
@@ -803,6 +829,11 @@ export function ProfileFeedieChrome({
         open={achievementsSheetOpen}
         onOpenChange={setAchievementsSheetOpen}
         items={achievementItems}
+      />
+
+      <UserProfileSheet
+        userId={profileSheetUserId}
+        onClose={() => setProfileSheetUserId(null)}
       />
 
       <Sheet open={messagesOpen} onOpenChange={setMessagesOpen}>
