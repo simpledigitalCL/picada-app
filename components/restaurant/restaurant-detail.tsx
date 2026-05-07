@@ -21,7 +21,6 @@ import { useAppStore } from '@/lib/stores/app-store'
 import { sharePicada } from '@/lib/social/share'
 import { slugDisplayFromAutomatedSlug } from '@/lib/tags/display'
 import { openUnifiedPostForm } from '@/lib/content/post-form-draft'
-import { CollectionPickerSheet } from '@/components/restaurant/collection-picker-sheet'
 import { isPlaceSaved, loadCollections, removeFromCollection, updatePlaceNote } from '@/lib/social/collections'
 import { toggleLike, hasLiked, getLikeCount, toggleFollow, isFollowing } from '@/lib/social/likes'
 import { placeTextMatchesLocation } from '@/lib/location/query-match'
@@ -266,9 +265,10 @@ interface RestaurantDetailProps {
   onClose: () => void
   onAddReview: () => void
   onAddPhoto: () => void
+  onPickerOpen?: () => void
 }
 
-export function RestaurantDetail({ restaurant: r, onClose, onAddReview, onAddPhoto }: RestaurantDetailProps) {
+export function RestaurantDetail({ restaurant: r, onClose, onAddReview, onAddPhoto, onPickerOpen }: RestaurantDetailProps) {
   const meta = CATEGORY_META[r.category] ?? CATEGORY_META.picada
   const [tab, setTab] = useState<'info' | 'catalog' | 'reviews' | 'photos'>('reviews')
   const [menuItems, setMenuItems] = useState<Array<{ id: string; item_name: string; rating?: number; review_text?: string; photo_url?: string | null; nutrition?: Record<string, number | string>; is_official?: boolean; metadata?: Record<string, unknown>; created_at?: string }>>([])
@@ -304,7 +304,6 @@ export function RestaurantDetail({ restaurant: r, onClose, onAddReview, onAddPho
   const [quickRating, setQuickRating] = useState(0)
   const [quickRated, setQuickRated] = useState(false)
   const [savedToCollection, setSavedToCollection] = useState(false)
-  const [pickerOpen, setPickerOpen] = useState(false)
   const [savedCollectionIds, setSavedCollectionIds] = useState<string[]>([])
   const [note, setNote] = useState('')
   const [photoPreview, setPhotoPreview] = useState<string | null>(null)
@@ -860,7 +859,7 @@ export function RestaurantDetail({ restaurant: r, onClose, onAddReview, onAddPho
 
             {/* Guardar */}
             <button
-              onClick={() => setPickerOpen(true)}
+              onClick={() => onPickerOpen?.()}
               className={cn(
                 'flex flex-col items-center gap-1.5 rounded-xl border px-1 pt-3 pb-2.5 active:scale-95 transition-all',
                 savedToCollection ? 'bg-rose-50 border-rose-300' : 'bg-muted/40 hover:bg-rose-50 hover:border-rose-200',
@@ -1263,11 +1262,6 @@ export function RestaurantDetail({ restaurant: r, onClose, onAddReview, onAddPho
           ) : null}
         </DialogContent>
       </Dialog>
-      <CollectionPickerSheet
-        open={pickerOpen}
-        onOpenChange={setPickerOpen}
-        place={{ placeId: r.id.replace(/^ext-/, ''), placeName: r.name, placeAddress: r.address, placePhoto: r.imageUrl }}
-      />
     </ScrollArea>
   )
 }

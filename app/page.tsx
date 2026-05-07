@@ -35,7 +35,9 @@ import { Toaster as SonnerToaster } from '@/components/ui/sonner'
 import { AdvancedSearchModal } from '@/components/search/advanced-search-modal'
 import { getSupabaseBrowserClient } from '@/lib/supabase'
 import { ensureProfileForSession } from '@/lib/auth/sync-profile'
+import { syncCollectionsFromSupabase } from '@/lib/social/collections'
 import { AuthQuickRegister } from '@/components/auth/auth-quick-register'
+import { CollectionPickerSheet } from '@/components/restaurant/collection-picker-sheet'
 import { AchievementToast } from '@/components/gamification/AchievementToast'
 
 const ONBOARDING_KEY = 'picada.onboarding.done.v1'
@@ -45,6 +47,7 @@ export default function Home() {
   const initAppStore = useAppStore(s => s.init)
   const [tab, setTab] = useState<Tab>('explore')
   const [selected, setSelected] = useState<Restaurant | null>(null)
+  const [pickerOpen, setPickerOpen] = useState(false)
   const [defaultLocation, setDefaultLocation] = useState('')
   const [locationQuery, setLocationQuery] = useState('')
   const [locationMode, setLocationMode] = useState<'manual' | 'auto'>('manual')
@@ -141,7 +144,10 @@ export default function Home() {
       const authed = Boolean(session?.user)
       setIsAuthed(authed)
       if (authed) setAuthRequiredOpen(false)
-      if (session) void ensureProfileForSession(session)
+      if (session) {
+        void ensureProfileForSession(session)
+        void syncCollectionsFromSupabase()
+      }
     })
     return () => sub.subscription.unsubscribe()
   }, [])
@@ -345,6 +351,13 @@ export default function Home() {
           </div>
         </DialogContent>
       </Dialog>
+      {selected && (
+        <CollectionPickerSheet
+          open={pickerOpen}
+          onOpenChange={setPickerOpen}
+          place={{ placeId: selected.id.replace(/^ext-/, ''), placeName: selected.name, placeAddress: selected.address, placePhoto: selected.imageUrl }}
+        />
+      )}
       <Dialog open={authRequiredOpen} onOpenChange={setAuthRequiredOpen}>
         <DialogContent className="max-w-sm rounded-2xl">
           <DialogHeader>
@@ -490,6 +503,7 @@ export default function Home() {
           side="bottom"
           showCloseButton={false}
           className="h-[90dvh] rounded-t-3xl p-0 flex flex-col overflow-hidden"
+          onPointerDownOutside={(e) => pickerOpen && e.preventDefault()}
         >
           <SheetTitle className="sr-only">Detalle del restaurante</SheetTitle>
           <div className="w-10 h-1 bg-muted-foreground/30 rounded-full mx-auto mt-3 shrink-0" />
@@ -499,6 +513,7 @@ export default function Home() {
               onClose={handleClose}
               onAddReview={handleAddReviewFromDetail}
               onAddPhoto={handleAddPhotoFromDetail}
+              onPickerOpen={() => setPickerOpen(true)}
             />
           )}
         </SheetContent>

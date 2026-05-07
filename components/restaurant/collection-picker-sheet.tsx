@@ -98,7 +98,11 @@ export function CollectionPickerSheet({ open, onOpenChange, place }: Props) {
       if (v) refreshState()
       onOpenChange(v)
     }}>
-      <SheetContent side="bottom" className="max-h-[70dvh] rounded-t-3xl px-5 pt-4 pb-8 overflow-y-auto">
+      <SheetContent
+        side="bottom"
+        className="max-h-[70dvh] rounded-t-3xl px-5 pt-4 pb-8 overflow-y-auto"
+        onPointerDownOutside={(e) => e.preventDefault()}
+      >
         <SheetTitle className="text-base font-bold">¿Dónde lo guardas?</SheetTitle>
         <AnimatePresence>
           <motion.div

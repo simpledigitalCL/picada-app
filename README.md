@@ -225,21 +225,35 @@ Formulario multi-step para crear:
 
 ### Tablas principales
 
+Tablas en `supabase/schema.sql` (schema base idempotente):
+
 | Tabla | Descripción |
 |---|---|
-| `profiles` | Perfil de usuario (username, bio, avatar, XP, nivel) |
-| `user_preferences` | Preferencias gastronómicas (likes, restricciones, experiencias) |
+| `profiles` | Perfil de usuario (username, bio, avatar, points, level) |
+| `user_preferences` | Preferencias gastronómicas (likes, restricciones, experiencias, ubicación) |
 | `user_visits` | Historial de visitas a locales |
-| `user_favorites` | Colecciones guardadas |
+| `user_favorites` | Colecciones guardadas (favoritos de contenido externo) |
 | `user_reviews` | Reseñas escritas por usuario |
-| `places` | Catálogo global de locales (enriquecido desde Google/OSM/usuarios) |
-| `posts` | Publicaciones (reseñas, fotos, videos) |
-| `place_tags` | Tags asociados a locales (auto-tags + manuales) |
-| `user_tag_affinity` | Afinidad usuario-tag para personalización |
-| `achievements` | Definición de logros disponibles |
-| `user_achievements` | Logros desbloqueados por usuario |
-| `gamification_events` | Eventos de XP server-side |
-| `tag_catalog` | Catálogo normalizado de tags gastronómicos |
+| `places` | Catálogo global de locales (enriquecido desde Google/OSM/usuarios, con flags dietéticos y `picada_score`) |
+| `posts` | Publicaciones del feed (review, photo, video, incognito, tip) |
+| `post_media` | Archivos de media asociados a un post (foto/video) |
+| `menu_items` | Platos con datos nutricionales (fuente: community, official o ai) |
+| `user_points` | Registro de puntos otorgados por acción (fuente de verdad de XP) |
+| `follows` | Relaciones de seguimiento entre usuarios |
+| `saved_items` | Ítems de menú guardados por usuario (pending / favorite) |
+| `place_change_log` | Auditoría de cambios en locales |
+
+Tablas adicionales creadas por **migraciones** (en `supabase/migrations/`):
+
+| Tabla | Migración | Descripción |
+|---|---|---|
+| `tag_catalog` | `20260430_tag_catalog_service.sql` | Catálogo normalizado de tags gastronómicos |
+| `user_tag_affinity` | `20260430_user_tag_affinity.sql` | Score de afinidad usuario↔tag |
+| `achievements` / `user_achievements` | `20260429_gamification_server_rewards.sql` | Logros y desbloqueos |
+| `gamification_events` | `20260429_gamification_server_rewards.sql` | Eventos de XP server-side |
+| `place_tags` / `tag_relations_stats` | `20260428_tag_relations_stats.sql` | Tags por local y estadísticas de relación |
+
+> **Importante:** El schema base + todas las migraciones deben ejecutarse en orden para tener la DB completa.
 
 ### Extensiones PostgreSQL requeridas
 
@@ -293,34 +307,53 @@ Sistema completo de gamificación orientado a aumentar el engagement:
 
 ### XP y Niveles
 
-| Nivel | Nombre | XP requerido |
-|---|---|---|
-| 1 | Explorador | 0 |
-| 2 | Picador | 500 |
-| 3 | Crítico | 2000 |
-| 4 | Leyenda | 5000 |
+Definidos en `lib/gamification.ts` (fuente de verdad del frontend):
+
+| Nivel | Nombre | Rango de puntos | Emoji |
+|---|---|---|---|
+| 1 | Explorador | 0 – 399 | 🧭 |
+| 2 | Crítico | 400 – 1.499 | 🍽️ |
+| 3 | Inspector | 1.500 – 4.999 | 🔍 |
+| 4 | Rey Picada | 5.000 – 9.999 | 👑 |
+
+> **Nota:** El schema SQL legacy tiene comentarios que mencionan "Picador/Leyenda" — esos nombres están desactualizados. El código TypeScript (`lib/gamification.ts:125-130`) es la fuente de verdad.
 
 ### Acciones que dan XP
 
-- Escribir reseña: +50 XP
-- Subir foto: +20 XP
-- Subir video: +30 XP
-- Primer voto en un local: +100 XP (bonificación "primer descubridor")
-- Check-in en local: +10 XP
-- Like recibido: +5 XP
-- Racha diaria mantenida: +25 XP/día
+El XP es **server-driven**: se otorga mediante triggers en la base de datos y se acumula en `profiles.points` vía la tabla `user_points`. Los valores exactos según el schema:
+
+| Acción | Puntos | Descripción |
+|---|---|---|
+| `create_picada` | +15 | Crear un local nuevo |
+| `first_photo` | +10 | Primera foto de un borrador de local |
+| `post_review` | +5 | Reseña con texto ≥ 10 caracteres |
+| `post_media` | +8 | Subir foto o video |
+| `complete_draft` | +10 | Completar datos faltantes de un local |
+| `first_visit` | +3 | Registrar visita a un local |
+
+El cliente (`lib/gamification-events.ts`) usa fallbacks mientras espera confirmación del server: `CONTENT_CREATED/USER_REVIEWED` → 10pts, `USER_VOTED` → 2pts, `USER_SAVED` → 3pts, `USER_SCANNED` → 10pts.
 
 ### Streaks
 
 Se trackea la racha de días consecutivos activos. Si no hay actividad en 24h se muestra un banner de advertencia ("Tu racha está en riesgo").
 
-### Logros (Achievements)
+### Logros (Achievements) y Badges
 
-Motor de logros en `lib/achievement-engine.ts`. Ejemplos:
-- "Primero en descubrir" — primer voto en un local
-- "Midnight snack" — abrir la app entre las 00:00 y 04:00
-- "Explorador de zona" — visitar 5 comunas distintas
-- "Crítico de élite" — 50 reseñas escritas
+Motor de logros en `lib/achievement-engine.ts`. Los desafíos se cargan dinámicamente desde `public/config/challenges.json`.
+
+Badges definidos en `lib/gamification.ts`:
+
+| Badge ID | Nombre | Condición |
+|---|---|---|
+| `primer_plato` | Primer Plato 🍕 | Subiste tu primera foto |
+| `explorador_10` | Explorador 🗺️ | Visitaste 10 locales distintos |
+| `critico_elite` | Crítico de Élite ⭐ | Escribiste 50 reseñas |
+| `racha_caliente` | Racha Caliente 🔥 | 7 días consecutivos activo |
+| `espia_gourmet` | Espía Gourmet 🤫 | 5 reviews en modo incógnito |
+| `foto_viral` | Foto Viral 📸 | Una foto recibió 10 votos útiles |
+| `mood_master` | Mood Master 🎭 | Usaste todos los moods disponibles |
+| `picada_rey` | Rey Picada 👑 | Alcanzaste 5.000 puntos |
+| `descubridor` | Descubridor 🌟 | Fuiste el primero en votar 3 locales |
 
 Los logros se notifican con un toast animado (`components/gamification/AchievementToast`).
 
@@ -331,8 +364,11 @@ Los logros se notifican con un toast animado (`components/gamification/Achieveme
 ### Scanner de platos (`/api/scanner`)
 
 - Recibe imagen base64 desde la cámara
-- Llama a **Claude (Anthropic)** con vision
-- Retorna: nombre del plato, descripción, estimación nutricional (kcal, proteínas, carbos, grasas), tags gastronómicos sugeridos
+- Llama a **Google Gemini 1.5 Flash** (`@google/generative-ai`) con vision
+- API key requerida: `GEMINI_API_KEY` (o `GOOGLE_API_KEY` como fallback) — **distinta** de `ANTHROPIC_API_KEY`
+- Retorna: nombre del plato, calorías estimadas, proteínas/carbos/grasas, apto vegetariano/vegano/sin gluten/sin lactosa, score viral, etiquetas detectadas
+- El resultado se marca como `draft_only: true` — es una sugerencia, no se publica automáticamente
+- Prompt calibrado para gastronomía chilena (distingue chorrillana, completo, paila marina, cazuela, etc.)
 
 ### Auto-tagging de locales (`lib/place-auto-tagging.ts`)
 
@@ -348,6 +384,8 @@ Los logros se notifican con un toast animado (`components/gamification/Achieveme
 ### Match Score (`lib/place-match.ts`)
 
 Score numérico 0-100 que indica qué tan bien encaja un local con el perfil del usuario. Se muestra en las cards del feed.
+
+> **Nota sobre IA:** El scanner de platos (`/api/scanner`) usa **Google Gemini 1.5 Flash** (`@google/generative-ai`), no Claude. Requiere `GEMINI_API_KEY` o `GOOGLE_API_KEY`. El auto-tagging de locales (`lib/place-auto-tagging.ts`) **no usa ningún LLM** — funciona con el sistema de puntuación y mapeo de categorías descrito en la sección de Tags.
 
 ---
 
@@ -413,8 +451,9 @@ cp .env.example .env.local
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Sí | Anon key (pública, va al browser) |
 | `SUPABASE_URL` | Sí | URL del proyecto Supabase (server-side) |
 | `SUPABASE_SERVICE_ROLE_KEY` | Sí | Service role key (privada, NUNCA exponer) |
-| `GOOGLE_MAPS_API_KEY` | Sí | API key de Google Maps Platform |
-| `ANTHROPIC_API_KEY` | Sí | API key de Anthropic (Claude) |
+| `GOOGLE_MAPS_API_KEY` | Sí | API key de Google Maps Platform (geocoding y Places) |
+| `GEMINI_API_KEY` | Sí | API key de Google Gemini (scanner de platos con visión IA) |
+| `ANTHROPIC_API_KEY` | No | API key de Anthropic Claude (módulo de inferencia — `lib/inference/`, uso futuro) |
 
 ### Google Maps — APIs requeridas
 
@@ -493,123 +532,211 @@ npm run android:sync:prod      # Sync apuntando a dominio de producción
 
 ### Sistema de Tags
 
-Los tags son el corazón del sistema de personalización. Conectan a los usuarios con los locales a través de sus preferencias reales de consumo. El sistema funciona en tres capas: clasificación, motor de sugerencias y pipeline de ejecución — **sin IA generativa**, basado enteramente en pesos, frecuencias y afinidad del usuario.
+Los tags son el corazón del sistema de personalización. El sistema opera con **6 módulos independientes** sin IA generativa: clasificación por regex, auto-tagging por pesos léxicos, match score, ranking, personalización de reels y normalización.
 
-#### Tipos de tags
+#### Prefijos de slug (namespacing canónico — `lib/tag-normalization.ts`)
 
-| Tipo | Ejemplos | Origen |
+| Prefijo | Categoría | Ejemplos reales del código |
 |---|---|---|
-| **Comida** | `pizza`, `sushi`, `vegano`, `sin_gluten` | Usuario + curación |
-| **Ambiente/Venue** | `romantico`, `familiar`, `terraza`, `pet_friendly` | Usuario + curación |
-| **Mood** | `chill`, `para_grupos`, `noche`, `almuerzo_rapido` | Usuario |
-| **Clasificación** | `picada`, `restoran`, `cafe`, `bar` | Mapeo desde categorías de Google Maps |
-| **Experiencia** | `buen_servicio`, `precio_calidad`, `instagram_worthy` | Usuario |
+| `food_` | Comida, restricciones, tipo de plato | `food_restrictions_vegano`, `food_tipo_plato_sushi_sashimi`, `food_nutrition_keto` |
+| `local_` | Tipo de establecimiento | `local_cafe_cafeteria`, `local_bar`, `local_parrilla`, `local_fuente_de_soda` |
+| `ambience_` | Ambiente y experiencia | `ambience_romantic`, `ambience_chill`, `ambience_familiar`, `ambience_ruidoso` |
+| `service_` | Servicios del local | `service_pet_friendly`, `service_estacionamiento`, `service_accesibilidad` |
+| `attr_` | Atributos / dress code | `attr_vestimenta_formal` |
 
 ---
 
-#### Capa 1 — Clasificación (`local_slug`)
+#### Módulo 1 — Clasificación para Filtros (`lib/place-category-filter.ts`)
 
-Cuando se selecciona un local de Google Maps (o de la DB interna), el sistema recibe las **categorías crudas** del lugar (ej: `['cafe', 'bakery', 'establishment']`) y las convierte en un `local_slug` normalizado que actúa como ID de clase para el motor de tags.
+Alimenta los **chips de categoría** del feed (Picada / Parrilla / Café / Vegano…). Opera solo en frontend, no escribe en DB.
 
-**Algoritmo de mapeo (`lib/place-category-filter.ts`):**
-
-```
-1. Priorización
-   → Se recorre un diccionario de keywords de ALTA PRIORIDAD
-   → Si se encuentra "bar", se detiene ahí aunque también diga "restaurant"
-   → Evita clasificaciones ambiguas
-
-2. Normalización por sinónimos
-   → Si no hay coincidencia exacta, busca en un segundo nivel de sinónimos
-   → "coffee_shop" → "cafe", "pizzeria" → "pizzeria", etc.
-
-3. Resultado
-   → local_slug: string normalizado (ej: "local_cafe", "local_pizzeria", "local_bar")
-   → Este slug es la clave de entrada al motor de sugerencias
-```
-
----
-
-#### Capa 2 — Motor de Sugerencias (Grafo de Afinidad)
-
-Para un `local_slug` dado, el sistema calcula la relevancia de cada tag posible combinando tres señales:
+**Algoritmo de mapeo:**
 
 ```
-Score de Relevancia = Tags de Curación + Frecuencia de Uso + Afinidad del Usuario
+Input: { name, address, inferredTags, automatedSeedTags } del local
 
-│
-├── Tags de Curación (peso fijo)
-│     → Tags "obligatorios" definidos manualmente para cada categoría
-│     → Ej: "Café de Especialidad" siempre aparece para local_cafe
-│     → Garantiza que locales nuevos ya tienen tags base correctos
-│
-├── Frecuencia de Uso (popularidad reciente)
-│     → Tags que otros usuarios han usado más para ese tipo de local
-│     → Ventana: últimos 30 días
-│     → Almacenado en: tag_relations_stats (conteo por local_slug + tag)
-│
-└── Afinidad del Usuario (personalización)
-      → Si el usuario suele marcar tags "Vegano", su peso sube en la lista
-      → Basado en: user_tag_affinity (score acumulado por interacciones)
-      → El mismo tag puede aparecer en posición 3 para un usuario y 8 para otro
-```
+1. placeClassificationCorpus()
+   → Concatena nombre + dirección + inferredTags + slugs de automatedSeedTags en minúsculas
+   → Resultado: un string "haystack" único por local
 
-La consulta que combina estas tres señales se ejecuta en Supabase como RPC (`/api/suggestions?source=local_slug`), devolviendo los tags ya ordenados por score.
+2. CATEGORY_RE — 13 patrones regex (uno por chip de exploración):
+   picada   → /picada|chilena|fuente de soda|sanguchería|completo|lomito.../
+   parrilla → /parrilla|asado|churrasco|vacuno|chorizo.../
+   vegano   → /vegano|vegan|plant.based|vegetariano|sin carne.../
+   cafe     → /café|cafetería|coffee|brunch|pasteleria|cold brew.../
+   japones  → /japon|sushi|ramen|izakaya|wok|gyoza.../
+   bar      → /\bbar\b|cocktail|cerveza artesanal|picoteo.../
+   (+ pizza, peruano, mexicano, mariscos, fitness, keto, premium)
 
----
+3. placeMatchesCategory(local, categoria)
+   → Testa el haystack contra el regex
+   → Un local puede coincidir con múltiples chips (no exclusivo)
 
-#### Capa 3 — Pipeline de Ejecución
-
-El algoritmo se dispara en este orden al abrir el formulario de publicación:
-
-```
-Paso A — Detección (frontend)
-  → Al seleccionar el lugar, se ejecuta derivedLocalSlug()
-  → Input: categorías crudas de Google Maps
-  → Output: local_slug normalizado
-
-Paso B — Carga silenciosa
-  → Mientras el usuario pasa del Paso 0 al Paso 1 del Wizard de post
-  → Se dispara fetch a /api/suggestions?source={local_slug}
-  → El usuario no espera: los tags cargan en segundo plano
-
-Paso C — Filtrado de exclusión
-  → Antes de renderizar, se filtran los tags que el usuario ya seleccionó
-  → Evita duplicados en la lista de sugerencias
-
-Paso D — Renderizado dinámico
-  → Tags ordenados por Score de Relevancia descendente
-  → El usuario ve primero los más relevantes para su perfil y ese tipo de local
+4. computeDynamicExploreChips(places)
+   → Cuenta coincidencias por categoría sobre todos los locales del resultado
+   → Ordena chips de mayor a menor frecuencia
+   → Solo muestra chips con al menos 1 coincidencia
 ```
 
 ---
 
-#### Acumulación de afinidad (`user_tag_affinity`)
+#### Módulo 2 — Auto-tagging por Pesos Léxicos (`lib/place-auto-tagging.ts`)
 
-Cada interacción del usuario actualiza su perfil de afinidad:
+Genera los **slugs persistentes** almacenados en `places.tagging_meta` (JSONB). Se ejecuta al registrar o enriquecer un local. Produce `automatedSeedTags` que el Módulo 1 consume.
+
+**Función principal: `inferAutomatedSeedTags(input)`**
 
 ```
-Acción                        → Delta de afinidad
-──────────────────────────────────────────────────
-Elegir tag en reseña          → +3
-Visitar local con ese tag     → +2
-Like a post con ese tag       → +1
-Buscar con ese tag            → +1
-Tag en preferencias de perfil → +5 (inicial, al configurar cuenta)
+Input: { name, google_types[], editorial_summary, reviews[] }
+
+1. Construye dos lienzos de texto:
+   ntCanvas = name + google_types.join(',') + editorial_summary  (peso x3)
+   rvCanvas = reviews.join('\n')                                  (peso x1)
+
+2. applyGoogleTypes(typesBlob) — mapea tipos de Google a slugs (confianza base 1.4):
+   coffee_shop | cafe          → local_cafe_cafeteria
+   bakery                      → local_pasteleria_brunch
+   bar                         → local_bar
+   sushi | japanese_restaurant → food_tipo_plato_sushi_sashimi
+   pizza | italian_restaurant  → food_tipo_plato_pizza
+   hamburger | meal_takeaway   → local_comida_rapida
+   mexican_restaurant          → food_cuisine_mexicana
+
+3. lexicalRules() — 16 reglas regex, cada una produce un slug:
+   Regla dispara en ntCanvas → inc(slug, nt=2.2, rv=0)
+   Regla dispara en rvCanvas → inc(slug, nt=0, rv=1.8)
+   Reglas: vegano, sin_gluten, sin_lactosa, sushi_sashimi, keto,
+           ambience_romantic, ambience_chill, ambience_familiar,
+           ambience_dimly_lit, ambience_ruidoso, service_piscina,
+           service_pet_friendly, service_estacionamiento,
+           service_accesibilidad, service_dress_code,
+           service_excelente_atencion, local_parrilla,
+           food_picada_tipica_cl, local_fuente_de_soda
+
+4. weightedConfidence(nt, rv):
+   confidence = (nt * 3 + rv * 1) / 44   → clamped [0.15, 0.96]
+   Tags con confidence < 0.19 → descartados
+
+5. Resultado: hasta 28 tags, ordenados por confidence DESC, deduplicados
+   Cada tag: { slug, confidence_score, is_automated: true, provenance }
+   provenance: 'name_types' | 'reviews' | 'both'
 ```
 
-El score acumulado se usa como entrada en la Capa 2 para personalizar el orden de sugerencias. Se actualiza vía `/api/affinity/track` y se almacena en `user_tag_affinity`.
+**Ejemplo:**
+```
+Input: { name: "Sushi Nakamura", google_types: ["japanese_restaurant", "sushi"] }
+applyGoogleTypes → food_tipo_plato_sushi_sashimi (nt += 1.4)
+lexicalRules     → food_tipo_plato_sushi_sashimi (nt += 2.2)  por /\bsushi\b/
+confidence = (3.6 * 3 + 0) / 44 = 0.245  ✅  provenance = 'name_types'
+```
+
+---
+
+#### Módulo 3 — Match Score Usuario↔Local (`lib/place-match.ts`)
+
+Score 5-99 que aparece en las cards del feed. Indica qué tan bien encaja el local con el perfil del usuario.
+
+```
+Base: 55 puntos
+
++ 18  por cada restricción dietética del usuario cumplida (texto menciona la restricción)
++ 16  si usuario pide vegano y el texto contiene "vegano"
++ 16  si usuario pide sin gluten y el texto contiene "sin_gluten"
++  4  por cada "like" del usuario que aparece en el texto del local
+- 10  por cada "dislike" del usuario que aparece en el texto del local
+
+Resultado: clamped min 5 / max 99
+glow = true si score >= 90  (activa efecto visual en la card)
+```
+
+El haystack de comparación se construye con: nombre + dirección + reseñas + `inferTagsFromText()` (que añade tags inferidos como `vegano`, `sin_gluten`, `ambiente_chill` antes de comparar).
+
+---
+
+#### Módulo 4 — Ranking de Picadas (`lib/ranking.ts`)
+
+```
+calculatePicadaRanking(picadas):
+  score = baseRating * 20 + externalReviews * 0.7 + communityVotes * 9 + (isOpenNow ? 12 : 0)
+
+calculateScore(user) — para leaderboard:
+  score = points * 1 + reviews * 25 + visits * 8 + votes * 4
+```
+
+---
+
+#### Módulo 5 — Personalización de Reels (`lib/reels-personalization.ts`)
+
+Ordena el feed de cards/videos por relevancia para el usuario. **Basado en localStorage** — funciona sin login.
+
+```
+scoreReel(item, prefs, interactions):
+
+Señal                              Peso
+─────────────────────────────────────────────────────
+Keywords gastronómicas base (12)   +1.1 por hit en texto del reel
+prefs.likes del usuario            +2.4 por hit
+prefs.dislikes del usuario         -3.0 por hit
+prefs.restrictions del usuario     -6.0 por hit (señal negativa fuerte)
+Reel previamente favoriteado       +8.0
+Reel previamente likeado           +5.0
+Autor previamente likeado          +3.5
+Plataforma (tiktok/ig) likeada     +1.8
+Popularidad del reel               +log10(max(likes, 1))  clamped a 3
+```
+
+Persistencia en localStorage:
+- `picada.preferences.v1` — likes, restrictions, dislikes, religion
+- `picada.reels.interactions.v1` — likedById, favoriteById, likedAuthors, likedPlatforms
+
+---
+
+#### Módulo 6 — Normalización de Tags (`lib/tag-normalization.ts`)
+
+Resuelve variantes ortográficas al comparar tags libres con el catálogo.
+
+```
+normalizeWithClosestMatch(raw, catalog):
+  1. Strip de acentos (NFD)
+  2. Lowercase + trim
+  3. Distancia de Levenshtein contra cada slug del catálogo
+  4. Threshold: input ≤5 chars → distancia máx 1; input >5 chars → distancia máx 2
+  5. Match encontrado → devuelve slug del catálogo
+  6. Sin match → titleCase del input original
+
+Ejemplo: "singluten" → levenshtein("singluten","sin_gluten") = 1 → match ✅
+```
+
+---
+
+#### Pipeline completo — de selección de local a tags en pantalla
+
+```
+Usuario selecciona local en el formulario de post
+   ↓
+usePostFormFlow.ts deriva localSlug desde la categoría del lugar
+   ↓
+/api/suggestions?source={localSlug}
+   → Supabase RPC: tags frecuentes para ese tipo + afinidad del usuario
+   ↓
+Frontend filtra tags ya seleccionados (evita duplicados)
+   ↓
+UnifiedTagInput renderiza tags ordenados por score
+   ↓
+Usuario confirma tags → se guardan en post.mood_tags / taxonomy.tags
+   ↓
+/api/affinity/track → actualiza user_tag_affinity por cada tag elegido
+```
 
 ---
 
 #### Feedback comunitario de tags
 
-Los usuarios pueden confirmar o rechazar tags de un local desde la vista de detalle:
-- Confirmar → `tag_feedback` con `vote = 1` → aumenta el peso del tag en ese local
-- Rechazar → `tag_feedback` con `vote = -1` → reduce el peso
-- Endpoint: `/api/places/tag-feedback`
-
-Esto permite que la comunidad corrija errores de clasificación sin intervención manual.
+- `POST /api/places/tag-feedback` con `{ slug, vote: 1 | -1 }`
+- `vote = 1` → `tag_signals[slug].upvotes++` en `places.tagging_meta`
+- `vote = -1` → `tag_signals[slug].downvotes++`
+- Tags rechazados → entran en `rejected_automated[]`
+- Tags manuales de comunidad → `manual_slugs[]` (no los sobreescribe un re-run del bot)
 
 ### Identidad anónima
 
@@ -643,14 +770,61 @@ Antes del login, el usuario tiene una identidad anónima (`lib/identity.ts`) alm
 
 ### Trabajo pendiente / Known issues
 
+#### Bugs confirmados en el código actual
+
+- [ ] **`lib/place-auto-tagging.ts:188-190` — Bug de `.slice(0,3)` en posición incorrecta**
+  El `.slice(0, 3)` se aplica a `[]` (array vacío) en lugar de a `input.reviews`, por precedencia de operadores. Si `input.reviews` trae más de 3 elementos, se procesan todos, ignorando el límite. Fix: `(input.reviews || []).slice(0, 3).map(...)`.
+
+- [ ] **`lib/reels-personalization.ts:205` — Username hardcodeado `'claudio'`**
+  `loadProfileSocialSettings()` tiene `username: 'claudio'` como valor por defecto. Debe tomarse del perfil autenticado de Supabase, no de un string literal.
+
+- [ ] **`lib/hooks/usePostFormSubmit.ts:124` — XP hardcodeado en +50 en el cliente**
+  El hook despacha `picada:xp-granted` con `amount: 50` fijo, independiente del tipo de acción. Contradice el sistema server-driven definido en `user_points`. El cliente debería leer el XP real de la respuesta del servidor.
+
+#### Validación — incompleta en múltiples capas
+
+- [ ] **`lib/validation/post-form-schema.ts` — Schema Zod casi vacío**
+  El schema solo valida longitud máxima de 4000 caracteres en `content/comment/description`. Faltan validaciones:
+  - Rating: sin validación en schema (solo en hook, puede bypassearse)
+  - Tags: sin validación de array (sin máximo de elementos, sin validación de formato de slug)
+  - Moods: igual que tags — sin ninguna validación
+  - Texto mínimo para reseñas (el schema SQL exige ≥10 chars, el frontend no lo verifica)
+  - `selectedPlace`: se valida en el hook pero no en el schema — inconsistente
+
+- [ ] **Sin validación de slugs en tags de usuario**
+  El usuario puede enviar cualquier string como tag sin que se verifique que pertenece al catálogo o sigue el formato `prefijo_slug`. La normalización existe (`lib/tag-normalization.ts`) pero no se aplica en el submit del formulario.
+
+- [ ] **Sin rate limiting real en API Routes**
+  `lib/server/rate-limit.ts` existe pero no está aplicado en todos los endpoints. `/api/posts`, `/api/scanner` y `/api/upload` son los más críticos.
+
+- [ ] **`/api/places` (GET/POST) y `/api/places/[id]` no existen**
+  El README los documentaba como existentes. Solo existen `/api/places/contribute-tag` y `/api/places/tag-feedback`. Si el programador necesita CRUD directo de locales desde el cliente, hay que crearlos.
+
+#### Gamificación — inconsistencias
+
+- [ ] **Inconsistencia entre `lib/gamification.ts` y `supabase/schema.sql`**
+  El schema SQL tiene comentarios con niveles "Picador/Leyenda" que no corresponden al código TypeScript real (Explorador/Crítico/Inspector/Rey Picada). Los comentarios del schema deben actualizarse para no confundir al programador que trabaje en migraciones futuras.
+
+- [ ] **Funciones de gamificación client-side son stubs**
+  `grantPoints()`, `unlockBadge()`, `checkAndUnlockBadges()`, `tickStreak()`, `loadChallenges()` en `lib/gamification.ts` devuelven valores vacíos o falsos. El comentario del código dice `// Deprecated: XP is computed server-side`. El sistema quedó en transición — el cliente llama funciones que no hacen nada y confía en `profiles.points` de Supabase. Hay que limpiar o documentar esto.
+
+#### Persistencia y sincronización
+
+- [ ] **Preferencias del feed en `localStorage` no se sincronizan con Supabase**
+  `lib/reels-personalization.ts` guarda likes/restrictions/interactions en `localStorage`. Si el usuario inicia sesión en otro dispositivo, pierde su perfil de personalización. Debe sincronizarse con `user_preferences` en Supabase post-login.
+
+- [ ] **Identidad anónima no migra a Supabase al hacer login**
+  `lib/identity.ts` crea un UUID anónimo en localStorage. El flujo de migración de esta identidad al perfil real de Supabase (`lib/auth/sync-profile.ts`) existe parcialmente pero no transfiere historial de afinidad de tags ni interacciones del feed.
+
+#### Funcionalidades ausentes
+
 - [ ] Push notifications nativas en Android (Capacitor Push Plugin pendiente)
-- [ ] Sistema de comentarios en posts (UI parcial, API pendiente)
-- [ ] Moderación de contenido (actualmente sin filtros automáticos)
+- [ ] Sistema de comentarios en posts (UI parcial, endpoint pendiente)
+- [ ] Moderación de contenido (sin filtros automáticos ni flujo de reporte)
 - [ ] Caché offline para el mapa (Service Worker)
 - [ ] Tests unitarios e integración (sin cobertura actual)
 - [ ] CI/CD pipeline (sin configurar)
-- [ ] Rate limiting en API Routes (sin implementar)
-- [ ] La carpeta `feedie/` contiene un fork/prototipo alternativo del proyecto — no está integrada en el build principal
+- [ ] La carpeta `feedie/` es un prototipo alternativo — no integrada en el build principal
 - [ ] Mejoras en la UX y reparación de gamificación ya implementada
 - [ ] Fix de formularios y corroboración de tags
 - [ ] Mejora en flujo de Foodie (Red Social)
@@ -662,22 +836,32 @@ Antes del login, el usuario tiene una identidad anónima (`lib/identity.ts`) alm
 ```
 auth.users
     │
-    ├── profiles (1:1)
-    ├── user_preferences (1:1)
-    ├── user_visits (1:N)
-    ├── user_favorites (1:N)
-    ├── user_reviews (1:N)
-    ├── user_achievements (1:N)
-    └── user_tag_affinity (1:N)
+    ├── profiles (1:1)           ← points, level, avatar
+    ├── user_preferences (1:1)   ← likes, restricciones, dieta, ubicación
+    ├── user_visits (1:N)        ← historial de visitas
+    ├── user_favorites (1:N)     ← colecciones guardadas
+    ├── user_reviews (1:N)       ← reseñas con rating y mood_tags
+    ├── user_points (1:N)        ← log de XP otorgado por acción (server-side)
+    ├── follows (N:N)            ← relaciones de seguimiento
+    ├── saved_items (1:N)        ← ítems de menú guardados
+    ├── user_achievements (1:N)  ← [migración] logros desbloqueados
+    └── user_tag_affinity (1:N)  ← [migración] score afinidad usuario↔tag
 
 places
-    ├── posts (N:1)
-    ├── place_tags (N:1)
+    ├── posts (N:1)              ← contenido del feed vinculado al local
+    ├── menu_items (N:1)         ← platos con datos nutricionales
+    ├── place_change_log (1:N)   ← auditoría de cambios
+    ├── place_tags (N:1)         ← [migración] tags asociados al local
     └── user_reviews → places (N:1)
 
-tag_catalog
+posts
+    └── post_media (1:N)         ← archivos de foto/video del post
+
+tag_catalog                      ← [migración] catálogo normalizado de tags
     ├── place_tags (N:1)
     └── user_tag_affinity (N:1)
+
+[migración] = creado por supabase/migrations/, no en schema.sql base
 ```
 
 ---

@@ -73,6 +73,16 @@ export function MapView({ onSelect, active, locationQuery, onLocationChange }: M
   const [reviewCounts, setReviewCounts] = useState<Record<string, { count: number; lastSeen: string }>>({})
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set())
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [pickerBlock, setPickerBlock] = useState(false)
+
+  useEffect(() => {
+    if (pickerOpen) {
+      setPickerBlock(true)
+    } else {
+      const t = window.setTimeout(() => setPickerBlock(false), 350)
+      return () => window.clearTimeout(t)
+    }
+  }, [pickerOpen])
   const [userPos, setUserPos] = useState<{ lat: number; lng: number } | null>(null)
   const [query, setQuery] = useState('')
   const [searchPlaceholder, setSearchPlaceholder] = useState('')
@@ -395,7 +405,7 @@ export function MapView({ onSelect, active, locationQuery, onLocationChange }: M
   }, [mapReady, locationQuery, placesForMap, reviewCounts, savedIds])
 
   return (
-    <div className="flex flex-col h-full relative overflow-hidden">
+    <div className={cn("flex flex-col h-full relative overflow-hidden", pickerBlock && "pointer-events-none")}>
       {/* Chips flotantes sobre el mapa */}
       <div className="absolute top-3 left-0 right-0 z-30 px-3 space-y-2 pointer-events-none">
         <LocationAutocomplete
