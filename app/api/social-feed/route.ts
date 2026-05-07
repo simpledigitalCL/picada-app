@@ -25,6 +25,7 @@ export async function GET(req: Request) {
   const entry = url.searchParams.get('entry') || ''
   const location = url.searchParams.get('location') || ''
   const placeFilter = (url.searchParams.get('place') || '').trim()
+  const userIdFilter = (url.searchParams.get('user_id') || '').trim()
 
   if (!supabase) return NextResponse.json({ posts: [] })
 
@@ -39,6 +40,10 @@ export async function GET(req: Request) {
 
   if (entry === 'new-picada') {
     query = query.contains('nutrition_data', { entryType: 'new-picada' } as never)
+  }
+
+  if (userIdFilter) {
+    query = query.eq('user_id', userIdFilter)
   }
 
   const { data, error } = await query

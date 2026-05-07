@@ -2,8 +2,13 @@ import { NextResponse } from 'next/server'
 import { getSupabaseServerClient } from '@/lib/supabase-server'
 import { requireAuthenticatedUser } from '@/lib/server/auth'
 import { sanitizeUserText } from '@/lib/utils/sanitize'
+import { consumeRateLimit, getClientIp } from '@/lib/server/rate-limit'
 
 export async function POST(req: Request) {
+  const ip = getClientIp(req)
+  const rl = consumeRateLimit(`reviews:${ip}`, 20, 60_000)
+  if (!rl.ok) return NextResponse.json({ ok: false, error: 'rate_limited' }, { status: 429 })
+
   const authUser = await requireAuthenticatedUser(req)
   if (!authUser) return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
 

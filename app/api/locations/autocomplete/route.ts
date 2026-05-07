@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { consumeRateLimit, getClientIp } from '@/lib/server/rate-limit'
 
 export type AutocompleteKind = 'all' | 'region' | 'city' | 'commune'
 
@@ -160,6 +161,10 @@ function dedupeItems(items: Item[]): Item[] {
 }
 
 export async function GET(req: Request) {
+  const ip = getClientIp(req)
+  const rl = consumeRateLimit(`locations-autocomplete:${ip}`, 30, 60_000)
+  if (!rl.ok) return NextResponse.json({ items: [] as Item[] }, { status: 429 })
+
   const url = new URL(req.url)
   const qRaw = (url.searchParams.get('q') || '').trim()
   if (qRaw.length < 2) return NextResponse.json({ items: [] as Item[] })

@@ -13,10 +13,19 @@ function getBearerToken(req: Request): string | null {
 
 export async function requireAuthenticatedUser(req: Request): Promise<AuthUser | null> {
   const token = getBearerToken(req)
-  if (!token) return null
+  if (!token) {
+    console.warn('[auth] requireAuthenticatedUser: no Bearer token in request')
+    return null
+  }
   const supabase = getSupabaseServerClient()
-  if (!supabase) return null
+  if (!supabase) {
+    console.error('[auth] requireAuthenticatedUser: getSupabaseServerClient() returned null — check SUPABASE_SERVICE_ROLE_KEY env var')
+    return null
+  }
   const { data, error } = await supabase.auth.getUser(token)
-  if (error || !data.user?.id) return null
+  if (error || !data.user?.id) {
+    console.warn('[auth] requireAuthenticatedUser: getUser failed', error?.message ?? 'no user id')
+    return null
+  }
   return { id: data.user.id, email: data.user.email }
 }

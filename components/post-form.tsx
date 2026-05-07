@@ -15,6 +15,7 @@ import type { PostFormDraft } from '@/lib/content/post-form-draft'
 import { usePostFormFlow } from '@/lib/hooks/usePostFormFlow'
 import { useMediaUpload } from '@/lib/hooks/useMediaUpload'
 import { usePostFormSubmit } from '@/lib/hooks/usePostFormSubmit'
+import { loadProfileSocialSettings, saveProfileSocialSettings } from '@/lib/feed/personalization'
 import { UnifiedTagInput } from '@/components/tags/unified-tag-input'
 import { MediaStep } from '@/components/post-form/steps/MediaStep'
 
@@ -159,16 +160,19 @@ export function PostForm({ type, locationQuery, contextRestaurant, draft, onClos
         }
       : null
 
-    console.error('FORM_ACCUMULATOR_PRE_SUBMIT:', {
-      place_id: selected?.id || null,
-      place_name: selected?.name || null,
-      category: flow.formAccumulator.placeCategory || selected?.category || selected?.businessType || null,
-      local_slug: flow.formAccumulator.localSlug || null,
-      rating: flow.formAccumulator.rating,
-      tags: flow.formAccumulator.contentTags,
-      moods: flow.formAccumulator.moods,
-    })
+    if (process.env.NODE_ENV === 'development') {
+      console.log('FORM_ACCUMULATOR_PRE_SUBMIT:', {
+        place_id: selected?.id || null,
+        place_name: selected?.name || null,
+        category: flow.formAccumulator.placeCategory || selected?.category || selected?.businessType || null,
+        local_slug: flow.formAccumulator.localSlug || null,
+        rating: flow.formAccumulator.rating,
+        tags: flow.formAccumulator.contentTags,
+        moods: flow.formAccumulator.moods,
+      })
+    }
 
+    let postId = `local-${Date.now()}`
     try {
       const result = await submitter.submit({
         type: kind,
@@ -181,6 +185,7 @@ export function PostForm({ type, locationQuery, contextRestaurant, draft, onClos
         mediaUrl,
         mediaKind: media.previewKind,
       })
+      if (result?.value?.post_id) postId = result.value.post_id
       if (result?.value?.quality_score && result.value.quality_score >= 0.7) {
         confetti({ particleCount: 90, spread: 65, origin: { y: 0.72 } })
       }
@@ -191,6 +196,26 @@ export function PostForm({ type, locationQuery, contextRestaurant, draft, onClos
     }
 
     toast({ title: '¡Publicado!', description: 'Tu aporte se guardó correctamente.' })
+
+    // Persist post to localStorage so it appears in the profile photo grid
+    const localPost = {
+      id: postId,
+      type: (mediaUrl ? 'photo' : 'review') as 'photo' | 'review',
+      text: flow.formAccumulator.comment || '',
+      place: flow.formAccumulator.selectedPlace?.name,
+      imageDataUrl: mediaUrl ?? undefined,
+      rating: flow.formAccumulator.rating || undefined,
+      tags: flow.formAccumulator.contentTags,
+      moods: flow.formAccumulator.moods,
+      createdAt: new Date().toISOString(),
+    }
+    const profileSettings = loadProfileSocialSettings()
+    saveProfileSocialSettings({
+      ...profileSettings,
+      socialPosts: [localPost, ...(profileSettings.socialPosts || [])],
+    })
+    window.dispatchEvent(new CustomEvent('picada:review-published', { detail: localPost }))
+    window.dispatchEvent(new CustomEvent('picada:post-published'))
     handleClose()
   }, [type, media, flow, submitter, toast, handleClose])
 

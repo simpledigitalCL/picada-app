@@ -2,8 +2,13 @@ import { NextResponse } from 'next/server'
 import { runCityInferenceBatch } from '@/lib/inference/tag-processor'
 import { requireAuthenticatedUser } from '@/lib/server/auth'
 import { getSupabaseServerClient } from '@/lib/supabase-server'
+import { consumeRateLimit, getClientIp } from '@/lib/server/rate-limit'
 
 export async function POST(req: Request) {
+  const ip = getClientIp(req)
+  const rl = consumeRateLimit(`run-inference:${ip}`, 3, 60_000)
+  if (!rl.ok) return NextResponse.json({ ok: false, error: 'rate_limited' }, { status: 429 })
+
   const auth = await requireAuthenticatedUser(req)
   if (!auth) {
     return NextResponse.json(

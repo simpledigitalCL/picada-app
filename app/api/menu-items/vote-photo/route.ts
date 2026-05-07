@@ -1,7 +1,12 @@
 import { NextResponse } from 'next/server'
 import { getSupabaseServerClient } from '@/lib/supabase-server'
+import { consumeRateLimit, getClientIp } from '@/lib/server/rate-limit'
 
 export async function POST(req: Request) {
+  const ip = getClientIp(req)
+  const rl = consumeRateLimit(`vote-photo:${ip}`, 20, 60_000)
+  if (!rl.ok) return NextResponse.json({ ok: false, error: 'rate_limited' }, { status: 429 })
+
   const supabase = getSupabaseServerClient()
   if (!supabase) return NextResponse.json({ ok: false }, { status: 500 })
   const body = (await req.json()) as {

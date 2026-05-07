@@ -180,14 +180,26 @@ export async function persistUnifiedContent(supabase: SupabaseClient, body: Unif
   const normalizedCategory = computed.normalizedCategory
   const normalizedTags = computed.normalizedTags
   const moods = body.taxonomy?.moods || []
-  const placeId = normalizeUuid(body.place?.id) || null
   const placeAddress = placeAddressSanitized || null
   const backgroundTasks: Promise<unknown>[] = []
+
+  // Resolver place_id: si es UUID lo usamos directo; si es external_id (Google Place ID) lo buscamos
+  let placeId = normalizeUuid(body.place?.id) || null
+  if (!placeId && body.place?.id) {
+    const externalId = String(body.place.id).trim()
+    const { data: placeRow } = await supabase
+      .from('places')
+      .select('id')
+      .eq('external_id', externalId)
+      .single()
+    placeId = (placeRow as { id?: string } | null)?.id ?? null
+  }
 
   const { data: insertedPost, error: postsError } = await supabase
     .from('posts')
     .insert({
       user_id: userId,
+      place_id: placeId,
       type: contentType,
       content: comment || null,
       rating,
@@ -208,6 +220,21 @@ export async function persistUnifiedContent(supabase: SupabaseClient, body: Unif
     .single()
   if (postsError) {
     return { ok: false as const, status: 500, error: postsError.message || 'posts_insert_failed' }
+  }
+
+  const postId = String((insertedPost as { id?: string } | null)?.id || '')
+
+  // Insertar media en post_media (bloqueante — es parte del post)
+  if (mediaUrl && mediaKind && postId) {
+    const { error: mediaError } = await supabase.from('post_media').insert({
+      post_id: postId,
+      url: mediaUrl,
+      media_type: mediaKind,
+      sort_order: 0,
+    })
+    if (mediaError) {
+      return { ok: false as const, status: 500, error: mediaError.message || 'post_media_insert_failed' }
+    }
   }
 
   // Secundario no bloqueante.
@@ -234,7 +261,7 @@ export async function persistUnifiedContent(supabase: SupabaseClient, body: Unif
           mark_as_picada: Boolean(body.review?.markAsPicada),
           ...(body.meta || {}),
         },
-      }).catch(() => undefined),
+      }).then(undefined, () => undefined) as Promise<unknown>,
     )
   }
 
@@ -265,7 +292,7 @@ export async function persistUnifiedContent(supabase: SupabaseClient, body: Unif
         normalized_tags: normalizedTags,
         normalized_category: normalizedCategory,
       },
-    }).catch(() => undefined),
+    }).then(undefined, () => undefined) as Promise<unknown>,
   )
 
   backgroundTasks.push(
@@ -289,7 +316,7 @@ export async function persistUnifiedContent(supabase: SupabaseClient, body: Unif
         completeness: computed.completeness,
         tags: normalizedTags,
       },
-    }).catch(() => undefined),
+    }).then(undefined, () => undefined) as Promise<unknown>,
   )
 
   backgroundTasks.push(ingestTagRelationStats(supabase, normalizedTags, userId).catch(() => undefined))
@@ -305,7 +332,7 @@ export async function persistUnifiedContent(supabase: SupabaseClient, body: Unif
   return {
     ok: true as const,
     value: {
-      post_id: String((insertedPost as { id?: string } | null)?.id || ''),
+      post_id: postId,
       quality_score: computed.qualityScore,
       engagement_score: computed.engagementScore,
       completeness: computed.completeness,

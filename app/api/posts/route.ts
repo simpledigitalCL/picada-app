@@ -36,7 +36,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: 'text_too_long' }, { status: 400 })
   }
   body.user = { ...(body.user || {}), id: authUser.id, username: body.user?.username || authUser.email || 'foodie' }
-  console.error('PAYLOAD_RECIBIDO:', body)
+  if (process.env.NODE_ENV === 'development') console.log('[api/posts] payload:', JSON.stringify(body).slice(0, 300))
   let result: Awaited<ReturnType<typeof persistUnifiedContent>>
   try {
     result = await persistUnifiedContent(supabase, body)

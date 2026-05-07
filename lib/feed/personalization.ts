@@ -199,7 +199,7 @@ export function splitCsvInput(raw: string): string[] {
 
 export function loadProfileSocialSettings(): ProfileSocialSettings {
   const fallback: ProfileSocialSettings = {
-    username: 'claudio',
+    username: '',
     bio: 'Food hunter de picadas y spots nuevos.',
     avatarDataUrl: '',
     instagramUrl: '',
