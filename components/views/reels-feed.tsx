@@ -846,6 +846,7 @@ const PlaceCard = memo(function PlaceCard({
   const votePicadaAction = useAppStore(s => s.votePicada)
   const prefs = useMemo(() => loadPreferences(), [])
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [pickerBlock, setPickerBlock] = useState(false)
   const [reviewCounts, setReviewCounts] = useState<Record<string, { count: number; lastSeen: string }>>({})
   const [collectionsCount, setCollectionsCount] = useState(0)
   const [showTooltip, setShowTooltip] = useState(false)
@@ -871,7 +872,17 @@ const PlaceCard = memo(function PlaceCard({
     refreshInteraction(p.id, p.name)
   }, [p.id, p.name, refreshInteraction])
 
+  useEffect(() => {
+    if (pickerOpen) {
+      setPickerBlock(true)
+    } else {
+      const t = window.setTimeout(() => setPickerBlock(false), 350)
+      return () => window.clearTimeout(t)
+    }
+  }, [pickerOpen])
+
   const handleClick = () => {
+    if (pickerBlock) return
     const prevClicks = Number(window.localStorage.getItem('picada.creator.clicks.v1') || '0')
     window.localStorage.setItem('picada.creator.clicks.v1', String(prevClicks + 1))
     window.dispatchEvent(new CustomEvent('picada:influence-updated'))

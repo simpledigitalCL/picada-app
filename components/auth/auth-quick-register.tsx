@@ -61,7 +61,9 @@ export function AuthQuickRegister() {
         setStatus({ msg: 'Cuenta creada. Revisa tu correo para confirmarla.' })
       }
     } else {
-      const { error } = await supabase.auth.resetPasswordForEmail(email.trim())
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: `${window.location.origin}/`,
+      })
       if (error) {
         const msg = error.status === 429 || error.message.toLowerCase().includes('rate')
           ? 'Límite de emails alcanzado. Espera unos minutos e inténtalo de nuevo.'

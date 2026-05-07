@@ -17,7 +17,6 @@ import {
   UtensilsCrossed,
   X,
   MapPin,
-  Star,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -30,6 +29,7 @@ import type { Badge as BadgeType } from '@/lib/gamification/core'
 import { getAllAchievementProgress, type FeaturedAchievement, type AchievementProgress, type DynamicChallenge, type Rarity } from '@/lib/gamification/achievement-engine'
 import { cn } from '@/lib/utils'
 import { SocialCommunityFeed } from '@/components/social-community-feed'
+import { loadCollections, type UserCollection } from '@/lib/social/collections'
 
 // ─── Estilos rareza ───────────────────────────────────────────────────────────
 const RARITY_PILL: Record<Rarity, { bg: string; text: string; label: string }> = {
@@ -254,154 +254,121 @@ const MOCK_PROFILES = [
   { handle: 'sabor_stgo', name: 'Laura P.', avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=80&h=80&fit=crop' },
 ]
 
-// ─── Saved places view ────────────────────────────────────────────────────────
-
-type SavedPlace = { id: string; name: string; address?: string; mapsUrl?: string }
-
-function openRestaurant(p: SavedPlace) {
-  window.dispatchEvent(new CustomEvent('picada:open-restaurant', {
-    detail: { id: p.id, name: p.name, address: p.address || '', mapsUrl: p.mapsUrl || '' },
-  }))
-}
+// ─── Collections view (Guardados) ────────────────────────────────────────────
 
 function GuardadosView() {
-  const [saved, setSaved] = useState<SavedPlace[]>([])
-  const [visitLater, setVisitLater] = useState<string[]>([])
+  const [collections, setCollections] = useState<UserCollection[]>([])
+  const [activeId, setActiveId] = useState<string | null>(null)
 
-  const loadData = () => {
-    // "Visitar más tarde" — stored as string[] (place names)
-    try {
-      const raw = window.localStorage.getItem('picada.pending.dishes.v1')
-      const items: unknown = raw ? JSON.parse(raw) : []
-      if (Array.isArray(items)) {
-        const names = items.map(i => (typeof i === 'string' ? i : String((i as { name?: string }).name || i)))
-        setVisitLater(names)
-      }
-    } catch { /* ignore */ }
-
-    // "Lugares votados" — cross-reference votes with visited places for real names/addresses
-    try {
-      const votesRaw = window.localStorage.getItem('picada.hot.userVotes.v1')
-      const votes: Record<string, boolean> = votesRaw ? JSON.parse(votesRaw) : {}
-      const votedIds = Object.entries(votes).filter(([, v]) => v).map(([id]) => id)
-
-      const visitedRaw = window.localStorage.getItem('picada.visited.places.v1')
-      const visited: Array<{ id: string; name: string; address: string }> = visitedRaw ? JSON.parse(visitedRaw) : []
-      const visitedById = Object.fromEntries(visited.map(v => [v.id, v]))
-
-      const result = votedIds.map(id => ({
-        id,
-        name: visitedById[id]?.name || id,
-        address: visitedById[id]?.address,
-      }))
-      setSaved(result)
-    } catch { /* ignore */ }
+  const load = () => {
+    const cols = loadCollections()
+    setCollections(cols)
+    setActiveId(prev => prev ?? (cols[0]?.id ?? null))
   }
 
   useEffect(() => {
-    loadData()
-    window.addEventListener('picada:social-updated', loadData)
-    return () => window.removeEventListener('picada:social-updated', loadData)
+    load()
+    window.addEventListener('picada:collection-updated', load)
+    return () => window.removeEventListener('picada:collection-updated', load)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const empty = saved.length === 0 && visitLater.length === 0
+  const activeCol = collections.find(c => c.id === activeId) ?? collections[0] ?? null
 
   return (
-    <div className="px-4 py-4 space-y-5">
-      <div>
-        <div className="flex items-center gap-2 mb-3">
-          <Bookmark className="size-4 text-sky-500" />
-          <h2 className="font-bold text-sm">Visitar más tarde</h2>
-          {visitLater.length > 0 && (
-            <Badge variant="secondary" className="text-[10px] px-1.5">{visitLater.length}</Badge>
-          )}
-        </div>
-        {visitLater.length === 0 ? (
-          <div className="rounded-xl border-2 border-dashed border-sky-200 bg-sky-50/50 p-4 text-center">
-            <p className="text-xs text-muted-foreground">Aún no tienes lugares guardados. Usa "Guardar para después" en los platos del ranking.</p>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {visitLater.map((name, i) => (
-              <Card key={`vl-${i}`} className="overflow-hidden">
-                <CardContent className="py-2.5 px-3 flex items-center gap-3">
-                  <div className="size-10 rounded-lg bg-sky-100 flex items-center justify-center text-lg shrink-0">📍</div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold truncate">{name}</p>
-                    <p className="text-xs text-muted-foreground">Guardado para visitar</p>
-                  </div>
-                  <Badge className="bg-sky-500 text-white text-[10px] shrink-0">Pendiente</Badge>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
+    <div className="flex flex-col">
+      {/* Tabs de colecciones */}
+      <div className="flex gap-2 px-4 pt-3 pb-2 overflow-x-auto scrollbar-none border-b border-orange-50">
+        {collections.map(col => (
+          <button
+            key={col.id}
+            type="button"
+            onClick={() => setActiveId(col.id)}
+            className={cn(
+              'shrink-0 flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-colors',
+              activeId === col.id
+                ? 'bg-orange-500 text-white shadow-sm'
+                : 'bg-muted text-muted-foreground hover:bg-orange-50 hover:text-orange-700',
+            )}
+          >
+            <span>{col.emoji}</span>
+            {col.name}
+            {col.places.length > 0 && (
+              <span className={cn('text-[10px] font-bold tabular-nums', activeId === col.id ? 'text-white/80' : 'text-muted-foreground')}>
+                {col.places.length}
+              </span>
+            )}
+          </button>
+        ))}
       </div>
 
-      <div>
-        <div className="flex items-center gap-2 mb-3">
-          <Star className="size-4 text-yellow-500" />
-          <h2 className="font-bold text-sm">Lugares votados</h2>
-          {saved.length > 0 && (
-            <Badge variant="secondary" className="text-[10px] px-1.5">{saved.length}</Badge>
-          )}
-        </div>
-        {saved.length === 0 ? (
-          <div className="rounded-xl border-2 border-dashed border-yellow-200 bg-yellow-50/50 p-4 text-center">
-            <p className="text-xs text-muted-foreground">Aún no has votado ninguna picada. Explora el ranking y vota los lugares que más te gusten.</p>
+      {/* Lugares de la colección activa */}
+      <div className="px-4 py-3 space-y-2">
+        {!activeCol || activeCol.places.length === 0 ? (
+          <div className="flex flex-col items-center gap-3 py-14 text-center">
+            <span className="text-5xl">{activeCol?.emoji ?? '📌'}</span>
+            <p className="font-bold text-sm">{activeCol?.name ?? 'Colección'} está vacía</p>
+            <p className="text-xs text-muted-foreground max-w-[220px]">
+              Guarda lugares desde el mapa o el buscador para verlos aquí.
+            </p>
           </div>
         ) : (
-          <div className="space-y-2">
-            {saved.slice(0, 20).map(p => (
-              <Card key={p.id}>
-                <CardContent className="py-2.5 px-3 flex items-center gap-3">
-                  <div className="size-10 rounded-lg bg-yellow-100 flex items-center justify-center text-lg shrink-0">⭐</div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold truncate">{p.name}</p>
-                    {p.address && <p className="text-xs text-muted-foreground truncate">{p.address}</p>}
+          activeCol.places.map(place => (
+            <Card key={place.placeId} className="overflow-hidden">
+              <CardContent className="p-0 flex items-center gap-0">
+                {place.placePhoto ? (
+                  <img
+                    src={place.placePhoto}
+                    alt=""
+                    className="size-16 shrink-0 object-cover"
+                  />
+                ) : (
+                  <div className="size-16 shrink-0 flex items-center justify-center bg-orange-50 text-2xl">
+                    {activeCol.emoji}
                   </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-7 text-[11px] px-2.5 border-orange-200 text-orange-700 hover:bg-orange-50"
-                      onClick={() => openRestaurant(p)}
-                    >
-                      <MapPin className="size-3 mr-1" />
-                      Abrir
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 w-7 p-0 text-muted-foreground"
-                      onClick={async () => {
-                        const text = `🍽️ ${p.name}${p.address ? ` · ${p.address}` : ''} — visto en Picada`
-                        if (navigator.share) {
-                          await navigator.share({ title: p.name, text }).catch(() => null)
-                        } else {
-                          await navigator.clipboard.writeText(text).catch(() => null)
-                        }
-                      }}
-                      aria-label="Compartir"
-                    >
-                      <Share2 className="size-3.5" />
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+                )}
+                <div className="flex-1 min-w-0 px-3 py-2.5">
+                  <p className="text-sm font-semibold truncate">{place.placeName}</p>
+                  {place.placeAddress && (
+                    <p className="text-xs text-muted-foreground truncate">{place.placeAddress}</p>
+                  )}
+                  {place.note && (
+                    <p className="text-[11px] italic text-orange-700 truncate mt-0.5">"{place.note}"</p>
+                  )}
+                </div>
+                <div className="flex items-center gap-1 pr-2 shrink-0">
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-8 w-8 text-orange-500"
+                    aria-label="Abrir"
+                    onClick={() =>
+                      window.dispatchEvent(new CustomEvent('picada:open-restaurant', {
+                        detail: { id: place.placeId, name: place.placeName, address: place.placeAddress || '' },
+                      }))
+                    }
+                  >
+                    <MapPin className="size-4" />
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-8 w-8 text-muted-foreground"
+                    aria-label="Compartir"
+                    onClick={async () => {
+                      const text = `🍽️ ${place.placeName}${place.placeAddress ? ` · ${place.placeAddress}` : ''} — visto en Picada`
+                      if (navigator.share) await navigator.share({ title: place.placeName, text }).catch(() => null)
+                      else await navigator.clipboard.writeText(text).catch(() => null)
+                    }}
+                  >
+                    <Share2 className="size-3.5" />
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ))
         )}
       </div>
-
-      {empty && (
-        <div className="flex flex-col items-center gap-3 py-8 text-center">
-          <span className="text-5xl">📌</span>
-          <p className="font-bold text-base">Sin guardados aún</p>
-          <p className="text-sm text-muted-foreground">Explora el ranking de picadas, vota y guarda los locales que quieras visitar.</p>
-        </div>
-      )}
     </div>
   )
 }

@@ -84,9 +84,9 @@ export function LeaderboardPanel({ locationQuery }: Props) {
         )}
       </CardHeader>
       <CardContent className="space-y-2 pt-0">
-        {entries.slice(0, 6).map(entry => (
+        {entries.slice(0, 6).map((entry, i) => (
           <div
-            key={entry.username}
+            key={`${i}-${entry.username}`}
             className={`flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors ${
               entry.isMe
                 ? 'bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-800'

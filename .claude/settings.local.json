@@ -50,7 +50,8 @@
       "mcp__supabase__list_tables",
       "mcp__supabase__execute_sql",
       "mcp__supabase__apply_migration",
-      "Bash(node -e \"require\\('fs'\\).readFileSync\\('/home/debian/documents/Github/picada-app/components/post-form/steps/LocationStep.tsx','utf8'\\).split\\('\\\\n'\\).slice\\(0,5\\).forEach\\(\\(l,i\\)=>console.log\\(i+1,l\\)\\)\")"
+      "Bash(node -e \"require\\('fs'\\).readFileSync\\('/home/debian/documents/Github/picada-app/components/post-form/steps/LocationStep.tsx','utf8'\\).split\\('\\\\n'\\).slice\\(0,5\\).forEach\\(\\(l,i\\)=>console.log\\(i+1,l\\)\\)\")",
+      "mcp__supabase__list_migrations"
     ]
   },
   "enableAllProjectMcpServers": true,

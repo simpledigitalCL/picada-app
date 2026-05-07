@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { BottomNav, type Tab } from '@/components/bottom-nav'
 import { ReelsFeed } from '@/components/views/reels-feed'
 import { ReelsView } from '@/components/views/reels-view'
@@ -39,6 +39,7 @@ import { syncCollectionsFromSupabase } from '@/lib/social/collections'
 import { AuthQuickRegister } from '@/components/auth/auth-quick-register'
 import { CollectionPickerSheet } from '@/components/restaurant/collection-picker-sheet'
 import { AchievementToast } from '@/components/gamification/AchievementToast'
+import { Input } from '@/components/ui/input'
 
 const ONBOARDING_KEY = 'picada.onboarding.done.v1'
 
@@ -48,6 +49,7 @@ export default function Home() {
   const [tab, setTab] = useState<Tab>('explore')
   const [selected, setSelected] = useState<Restaurant | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [pickerBlock, setPickerBlock] = useState(false)
   const [defaultLocation, setDefaultLocation] = useState('')
   const [locationQuery, setLocationQuery] = useState('')
   const [locationMode, setLocationMode] = useState<'manual' | 'auto'>('manual')
@@ -60,6 +62,7 @@ export default function Home() {
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [authRequiredOpen, setAuthRequiredOpen] = useState(false)
   const [isAuthed, setIsAuthed] = useState(false)
+  const [passwordRecovery, setPasswordRecovery] = useState(false)
   const [scanOpen, setScanOpen] = useState(false)
   const [streakRisk, setStreakRisk] = useState(false)
 
@@ -95,6 +98,15 @@ export default function Home() {
     const dispose = initAppStore()
     return () => dispose()
   }, [initAppStore])
+
+  useEffect(() => {
+    if (pickerOpen) {
+      setPickerBlock(true)
+    } else {
+      const t = window.setTimeout(() => setPickerBlock(false), 350)
+      return () => window.clearTimeout(t)
+    }
+  }, [pickerOpen])
 
   useEffect(() => {
     const handler = (ev: Event) => {
@@ -140,7 +152,17 @@ export default function Home() {
       if (authed) setAuthRequiredOpen(false)
       if (data.session) void ensureProfileForSession(data.session)
     })
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT') {
+        window.localStorage.removeItem('picada.profile.social.v1')
+        window.localStorage.removeItem('picada.collections.v1')
+        window.location.reload()
+        return
+      }
+      if (event === 'PASSWORD_RECOVERY') {
+        setPasswordRecovery(true)
+        return
+      }
       const authed = Boolean(session?.user)
       setIsAuthed(authed)
       if (authed) setAuthRequiredOpen(false)
@@ -243,7 +265,10 @@ export default function Home() {
       }
     } catch { /* ignore */ }
   }
-  const handleClose  = () => setSelected(null)
+  const handleClose  = () => {
+    if (pickerOpen || pickerBlock) return
+    setSelected(null)
+  }
   /** Misma lógica en perfil, inicio, mapa y picada: etiqueta + persistencia global (geo la define el modal). */
   const applyGlobalLocationLabel = (value: string) => {
     const v = value.trim()
@@ -498,7 +523,7 @@ export default function Home() {
       <SonnerToaster />
       <AchievementToast />
 
-      <Sheet open={!!selected} onOpenChange={open => !open && handleClose()}>
+      <Sheet open={!!selected} onOpenChange={open => !open && !pickerOpen && !pickerBlock && handleClose()}>
         <SheetContent
           side="bottom"
           showCloseButton={false}
