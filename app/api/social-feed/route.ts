@@ -16,6 +16,7 @@ export type SocialPost = {
   quality_score?: number
   tags?: string[]
   entry_type?: string
+  like_count: number
 }
 
 export async function GET(req: Request) {
@@ -51,17 +52,27 @@ export async function GET(req: Request) {
 
   if (error) return NextResponse.json({ posts: [] })
 
-  // Batch-fetch usernames from profiles for all post authors
+  const postIds = (data || []).map(r => r.id).filter(Boolean)
+
+  // Batch-fetch usernames and like counts in parallel
   const userIds = [...new Set((data || []).map(r => r.user_id).filter(Boolean))]
+  const [profilesRes, likesRes] = await Promise.all([
+    userIds.length > 0
+      ? supabase.from('profiles').select('id, username').in('id', userIds)
+      : Promise.resolve({ data: [] }),
+    postIds.length > 0
+      ? supabase.from('post_likes').select('post_id').in('post_id', postIds)
+      : Promise.resolve({ data: [] }),
+  ])
+
   const profileByUserId = new Map<string, string>()
-  if (userIds.length > 0) {
-    const { data: profiles } = await supabase
-      .from('profiles')
-      .select('id, username')
-      .in('id', userIds)
-    for (const p of profiles || []) {
-      if (p.username) profileByUserId.set(p.id, p.username)
-    }
+  for (const p of (profilesRes.data || []) as Array<{ id: string; username: string }>) {
+    if (p.username) profileByUserId.set(p.id, p.username)
+  }
+
+  const likeCountByPost = new Map<string, number>()
+  for (const row of (likesRes.data || []) as Array<{ post_id: string }>) {
+    likeCountByPost.set(row.post_id, (likeCountByPost.get(row.post_id) || 0) + 1)
   }
 
   const posts: SocialPost[] = (data || []).map(row => {
@@ -95,6 +106,7 @@ export async function GET(req: Request) {
       quality_score: Number(nd.quality_score || 0),
       tags: Array.isArray(nd.normalized_tags) ? (nd.normalized_tags as string[]) : [],
       entry_type: entryType,
+      like_count: likeCountByPost.get(row.id) || 0,
     }
   }).filter(Boolean) as SocialPost[]
 

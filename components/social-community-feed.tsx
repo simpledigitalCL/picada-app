@@ -16,6 +16,7 @@ import { isAuthenticatedClient, requireAuthOrPrompt } from '@/lib/auth/gate'
 import type { Restaurant } from '@/lib/places/restaurants'
 import { slugDisplayFromAutomatedSlug } from '@/lib/tags/display'
 import { sanitizeUserText } from '@/lib/utils/sanitize'
+import { getSupabaseBrowserClient } from '@/lib/supabase'
 
 // ─── Local post type (from localStorage) ──────────────────────────────────────
 
@@ -194,16 +195,19 @@ function PostCard({
   post,
   username,
   isOwn,
+  liked,
+  onToggleLike,
   onSelectPlace,
 }: {
   post: SocialPost | (LocalPost & { username: string; source: 'local' })
   username: string
   isOwn: boolean
+  liked: boolean
+  onToggleLike: () => void
   onSelectPlace?: (r: Restaurant) => void
 }) {
-  const [liked, setLiked] = useState(false)
-  const [likeCount] = useState(Math.floor(Math.random() * 20))
   const isLocal = 'source' in post && post.source === 'local'
+  const likeCount = isLocal ? 0 : ((post as SocialPost).like_count ?? 0)
 
   const placeName = isLocal ? (post as LocalPost).place || null : (post as SocialPost).place_name
   const content = isLocal ? (post as LocalPost).text : (post as SocialPost).content
@@ -349,7 +353,7 @@ function PostCard({
       <div className="flex items-center gap-3 px-4 pt-2.5">
         <motion.button
           whileTap={{ scale: 0.85 }}
-          onClick={() => setLiked(l => !l)}
+          onClick={onToggleLike}
           className="flex items-center gap-1"
           aria-label="Me gusta"
         >
@@ -520,6 +524,7 @@ export function SocialCommunityFeed({
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [isAuthed, setIsAuthed] = useState(false)
+  const [likedPostIds, setLikedPostIds] = useState<Set<string>>(new Set())
   const myUserId = useRef<string>('')
 
   const loadLocalPosts = () => {
@@ -536,9 +541,66 @@ export function SocialCommunityFeed({
       const res = await fetch('/api/social-feed?limit=40')
       if (res.ok) {
         const data = (await res.json()) as { posts: SocialPost[] }
-        setRemotePosts(data.posts || [])
+        const posts = data.posts || []
+        setRemotePosts(posts)
+
+        // Batch-fetch which posts the current user has liked
+        const ids = posts.map(p => p.id).filter(Boolean)
+        if (ids.length > 0) {
+          const supabase = getSupabaseBrowserClient()
+          const token = supabase
+            ? (await supabase.auth.getSession()).data.session?.access_token
+            : null
+          if (token) {
+            fetch(`/api/likes?post_ids=${ids.join(',')}`, {
+              headers: { Authorization: `Bearer ${token}` },
+            })
+              .then(r => r.ok ? r.json() : null)
+              .then((d: { liked?: string[] } | null) => {
+                if (d?.liked) setLikedPostIds(new Set(d.liked))
+              })
+              .catch(() => null)
+          }
+        }
       }
     } catch { /* keep existing */ } finally { setRefreshing(false) }
+  }
+
+  const handleToggleLike = async (post: SocialPost) => {
+    if (!isAuthed) { requireAuthOrPrompt(); return }
+
+    const isLiked = likedPostIds.has(post.id)
+    // Optimistic update
+    setLikedPostIds(prev => {
+      const next = new Set(prev)
+      isLiked ? next.delete(post.id) : next.add(post.id)
+      return next
+    })
+
+    const supabase = getSupabaseBrowserClient()
+    const token = supabase
+      ? (await supabase.auth.getSession()).data.session?.access_token
+      : null
+    if (!token) return
+
+    const allTags = [...(post.tags || []), ...(post.mood_tags || [])]
+    fetch('/api/likes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        post_id: post.id,
+        action: isLiked ? 'unlike' : 'like',
+        author_id: post.user_id,
+        tags: allTags,
+      }),
+    }).catch(() => {
+      // Revert on failure
+      setLikedPostIds(prev => {
+        const next = new Set(prev)
+        isLiked ? next.add(post.id) : next.delete(post.id)
+        return next
+      })
+    })
   }
 
   useEffect(() => {
@@ -663,6 +725,11 @@ export function SocialCommunityFeed({
                 post={post}
                 username={username}
                 isOwn={'source' in post && post.source === 'local'}
+                liked={!('source' in post) && likedPostIds.has(post.id)}
+                onToggleLike={() => {
+                  if ('source' in post) return
+                  void handleToggleLike(post as SocialPost)
+                }}
                 onSelectPlace={onSelectPlace}
               />
             </motion.div>
