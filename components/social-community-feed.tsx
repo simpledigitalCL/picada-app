@@ -16,6 +16,7 @@ import { isAuthenticatedClient, requireAuthOrPrompt } from '@/lib/auth/gate'
 import type { Restaurant } from '@/lib/places/restaurants'
 import { slugDisplayFromAutomatedSlug } from '@/lib/tags/display'
 import { sanitizeUserText } from '@/lib/utils/sanitize'
+import { proxyVideoUrl, videoMimeFromUrl } from '@/lib/utils'
 import { getSupabaseBrowserClient } from '@/lib/supabase'
 
 // ─── Local post type (from localStorage) ──────────────────────────────────────
@@ -315,8 +316,20 @@ function PostCard({
       {mediaUrl ? (
         <div className="relative bg-muted overflow-hidden">
           {isVideo ? (
-            <div className="relative aspect-video">
-              <video src={mediaUrl} className="w-full h-full object-cover" controls playsInline preload="metadata" />
+            <div className="relative aspect-video bg-black">
+              <video
+                className="w-full h-full object-cover"
+                controls
+                playsInline
+                preload="metadata"
+              >
+                {/* Proxy same-origin para evitar bloqueos de Firefox ETP/CORS */}
+                <source src={proxyVideoUrl(mediaUrl) ?? undefined} type={videoMimeFromUrl(mediaUrl)} />
+                <source src={mediaUrl} type={videoMimeFromUrl(mediaUrl)} />
+                <p className="flex items-center justify-center text-xs text-white/70 p-4 text-center">
+                  Tu navegador no puede reproducir este video.
+                </p>
+              </video>
             </div>
           ) : mediaUrl.startsWith('data:') ? (
             // eslint-disable-next-line @next/next/no-img-element

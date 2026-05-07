@@ -2,6 +2,7 @@
 
 import { useRef, useState } from 'react'
 import { getAuthHeaders } from '@/lib/api/auth'
+import { compressImage, compressVideo } from '@/lib/media/compress'
 
 type PreviewKind = 'photo' | 'video' | null
 
@@ -10,6 +11,8 @@ export function useMediaUpload() {
   const [preview, setPreview] = useState<string | null>(null)
   const [previewKind, setPreviewKind] = useState<PreviewKind>(null)
   const [uploading, setUploading] = useState(false)
+  const [compressing, setCompressing] = useState(false)
+  const [compressProgress, setCompressProgress] = useState(0)
   const [uploadedUrl, setUploadedUrl] = useState<string | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
 
@@ -17,6 +20,8 @@ export function useMediaUpload() {
     setPreview(null)
     setPreviewKind(null)
     setUploading(false)
+    setCompressing(false)
+    setCompressProgress(0)
     setUploadedUrl(null)
     setUploadError(null)
   }
@@ -24,22 +29,45 @@ export function useMediaUpload() {
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
+
     const isVideo = file.type.startsWith('video/')
     const kind: PreviewKind = isVideo ? 'video' : 'photo'
     setPreviewKind(kind)
     setUploadedUrl(null)
     setUploadError(null)
+    setCompressProgress(0)
 
+    // Show preview immediately from original file
     const reader = new FileReader()
     reader.onload = ev => setPreview(ev.target?.result as string)
     reader.readAsDataURL(file)
 
-    setUploading(true)
     try {
+      let fileToUpload = file
+
+      if (isVideo) {
+        // Client-side size check before compressing
+        if (file.size > 200 * 1024 * 1024) {
+          setUploadError('El video es demasiado grande (máx. 200 MB). Recórtalo antes de subir.')
+          return
+        }
+        setCompressing(true)
+        fileToUpload = await compressVideo(file, ratio => {
+          setCompressProgress(Math.round(ratio * 100))
+        })
+        setCompressing(false)
+        setCompressProgress(0)
+      } else {
+        // Compress image before uploading
+        fileToUpload = await compressImage(file)
+      }
+
+      setUploading(true)
       const form = new FormData()
-      form.append('file', file)
+      form.append('file', fileToUpload)
       const authHeaders = await getAuthHeaders()
       const res = await fetch('/api/upload', { method: 'POST', body: form, headers: authHeaders })
+
       if (res.ok) {
         const data = (await res.json()) as { ok: boolean; url?: string }
         if (data.ok && data.url) setUploadedUrl(data.url)
@@ -61,6 +89,7 @@ export function useMediaUpload() {
       }
     } catch {
       setUploadError('Falló la subida del archivo. Reintenta para publicarlo con foto/video.')
+      setCompressing(false)
     } finally {
       setUploading(false)
     }
@@ -71,6 +100,8 @@ export function useMediaUpload() {
     preview,
     previewKind,
     uploading,
+    compressing,
+    compressProgress,
     uploadedUrl,
     uploadError,
     setPreview,

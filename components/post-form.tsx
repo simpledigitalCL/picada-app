@@ -345,6 +345,19 @@ export function PostForm({ type, locationQuery, contextRestaurant, draft, onClos
                 />
               )}
 
+              {/* Progreso de compresión de video */}
+              {media.compressing && (
+                <div className="rounded-xl bg-orange-50 border border-orange-200 px-3 py-2 space-y-1.5">
+                  <p className="text-xs text-orange-700 font-medium">Comprimiendo video… {media.compressProgress}%</p>
+                  <div className="h-1.5 rounded-full bg-orange-100 overflow-hidden">
+                    <div
+                      className="h-full bg-orange-500 transition-all duration-300"
+                      style={{ width: `${media.compressProgress}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
               {/* Error de upload de media */}
               {media.uploadError && (
                 <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
@@ -390,13 +403,15 @@ export function PostForm({ type, locationQuery, contextRestaurant, draft, onClos
             <Button
               className="flex-1 rounded-2xl h-12 bg-orange-500 hover:bg-orange-600 text-white font-semibold"
               onClick={handleSubmit}
-              disabled={submitter.isSubmitting || media.uploading}
+              disabled={submitter.isSubmitting || media.uploading || media.compressing}
             >
               {submitter.isSubmitting
                 ? 'Publicando…'
-                : media.uploading
-                  ? 'Subiendo archivo…'
-                  : 'Publicar'}
+                : media.compressing
+                  ? `Comprimiendo… ${media.compressProgress}%`
+                  : media.uploading
+                    ? 'Subiendo archivo…'
+                    : 'Publicar'}
             </Button>
           )}
         </div>

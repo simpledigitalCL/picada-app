@@ -8,7 +8,7 @@ import { type Restaurant, CATEGORY_META, priceLabel } from '@/lib/places/restaur
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { cn } from '@/lib/utils'
+import { cn, proxyVideoUrl } from '@/lib/utils'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { MatchScore } from '@/components/restaurant/match-score'
 import { loadPreferences } from '@/lib/feed/personalization'
@@ -194,7 +194,13 @@ function CommunityPostCard({ post, placeName }: { post: CommunityPost; placeName
         <div className="relative bg-black">
           {isVideo ? (
             <div className="relative aspect-video">
-              <video src={String(post.mediaUrl).trim()} controls playsInline preload="metadata" className="w-full h-full object-contain" />
+              <video
+                src={proxyVideoUrl(String(post.mediaUrl).trim()) ?? String(post.mediaUrl).trim()}
+                controls
+                playsInline
+                preload="metadata"
+                className="w-full h-full object-contain"
+              />
             </div>
           ) : String(post.mediaUrl).startsWith('data:') ? (
             // eslint-disable-next-line @next/next/no-img-element
