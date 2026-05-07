@@ -524,8 +524,13 @@ export function SocialCommunityFeed({
       const post = (e as CustomEvent<LocalPost>).detail
       setLocalPosts(prev => [post, ...prev])
     }
+    const onPostPublished = () => { void fetchRemote(true) }
     window.addEventListener('picada:review-published', onPublished)
-    return () => window.removeEventListener('picada:review-published', onPublished)
+    window.addEventListener('picada:post-published', onPostPublished)
+    return () => {
+      window.removeEventListener('picada:review-published', onPublished)
+      window.removeEventListener('picada:post-published', onPostPublished)
+    }
   }, [])
 
   const localAsSocial = localPosts.map(p => ({ ...p, username, source: 'local' as const }))

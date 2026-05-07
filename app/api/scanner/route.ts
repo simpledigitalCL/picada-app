@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { GoogleGenerativeAI } from '@google/generative-ai'
+import { consumeRateLimit, getClientIp } from '@/lib/server/rate-limit'
 
 const SYSTEM_PROMPT = `Eres nutricionista chileno y analista gastronómico.
 Reconoce platos típicos de Chile (chorrillana, completo, paila marina, pastel de choclo, cazuela, empanadas, etc.).
@@ -35,6 +36,10 @@ function extractJson(raw: string) {
 }
 
 export async function POST(req: NextRequest) {
+  const ip = getClientIp(req)
+  const rl = consumeRateLimit(`scanner:${ip}`, 5, 60_000)
+  if (!rl.ok) return NextResponse.json({ error: 'rate_limited' }, { status: 429 })
+
   try {
     const { imagen_base64, media_type } = await req.json()
     const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY

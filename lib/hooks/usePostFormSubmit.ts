@@ -110,6 +110,7 @@ export function usePostFormSubmit() {
       const data = (await res.json().catch(() => ({}))) as {
         ok?: boolean
         value?: {
+          post_id?: string
           quality_score?: number
           engagement_score?: number
           completeness?: number

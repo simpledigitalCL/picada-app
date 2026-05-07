@@ -142,11 +142,10 @@ export function LocationSelector({
     const supabase = getSupabaseBrowserClient()
     if (supabase) {
       if (!s.category) {
-        const { data } = await supabase
-          .from('places')
-          .select('category, business_type')
-          .eq('id', s.id)
-          .single()
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s.id)
+        const placeQuery = supabase.from('places').select('category, business_type')
+        const { data } = await (isUuid ? placeQuery.eq('id', s.id) : placeQuery.eq('external_id', s.id))
+          .maybeSingle()
         if (data) {
           next = {
             ...s,

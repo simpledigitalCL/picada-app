@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { getSupabaseBrowserClient } from '@/lib/supabase'
 import {
   Bookmark,
   Camera,
@@ -122,7 +123,7 @@ function DynamicAchievementsSection() {
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Completados</p>
           {unlocked.map(({ challenge, progress }) => (
             <Card key={challenge.id} className="border-l-4 border-l-green-500">
-              <CardContent className="flex items-center gap-3 py-3">
+              <CardContent className="flex items-center gap-3 px-4 py-3">
                 <div className={`flex size-10 shrink-0 items-center justify-center rounded-xl text-xl ${RARITY_DOT[challenge.rarity]}`}>
                   {challenge.visual.type === 'emoji' ? challenge.visual.value : '🏆'}
                 </div>
@@ -153,7 +154,7 @@ function DynamicAchievementsSection() {
             const pct = Math.round((progress.count / challenge.target) * 100)
             return (
               <Card key={challenge.id} className="border-l-4 border-l-orange-400">
-                <CardContent className="flex items-center gap-3 py-3">
+                <CardContent className="flex items-center gap-3 px-4 py-3">
                   <div className={`flex size-10 shrink-0 items-center justify-center rounded-xl text-xl ${RARITY_DOT[challenge.rarity]}`}>
                     {challenge.visual.type === 'emoji' ? challenge.visual.value : '🔓'}
                   </div>
@@ -330,10 +331,10 @@ function LevelProgressHint({ points }: { points: number }) {
     <motion.div
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
-      className="flex items-center gap-2 rounded-lg bg-muted/60 px-3 py-2 text-xs"
+      className="flex items-start gap-2 rounded-lg bg-muted/60 px-3 py-2 text-xs"
     >
-      <TrendingUp className="size-3.5 text-orange-500 shrink-0" />
-      <span className="text-muted-foreground">
+      <TrendingUp className="size-3.5 text-orange-500 shrink-0 mt-0.5" />
+      <span className="text-muted-foreground min-w-0 break-words">
         <span className="font-semibold text-foreground">{remaining} XP más</span>
         {' '}para llegar a{' '}
         <span className="font-semibold text-foreground">{siguiente.nombre} {siguiente.emoji}</span>
@@ -471,7 +472,7 @@ export function ProfileView({
   const [restrictions, setRestrictions] = useState<string[]>([])
   const [dislikes, setDislikes] = useState<string[]>([])
   const [religion, setReligion] = useState('ninguna')
-  const [username, setUsername] = useState('claudio')
+  const [username, setUsername] = useState('')
   const [bio, setBio] = useState('')
   const [reviewsText, setReviewsText] = useState('')
   const [visitedText, setVisitedText] = useState('')
@@ -523,6 +524,46 @@ export function ProfileView({
     setUsername(social.username)
     setBio(social.bio)
     setAvatarDataUrl(social.avatarDataUrl || '')
+
+    // Sobreescribir con datos reales de Supabase si hay sesión
+    const supabase = getSupabaseBrowserClient()
+    if (supabase) {
+      supabase.auth.getSession().then(({ data: sessionData }) => {
+        const userId = sessionData.session?.user?.id
+        if (!userId) return
+        supabase
+          .from('profiles')
+          .select('username, avatar_url')
+          .eq('id', userId)
+          .single()
+          .then(({ data: profile }) => {
+            if (profile?.username) setUsername(profile.username)
+            if (profile?.avatar_url && !social.avatarDataUrl) setAvatarDataUrl(profile.avatar_url)
+          })
+        // Cargar posts propios del servidor para que aparezcan en la grilla
+        fetch(`/api/social-feed?user_id=${encodeURIComponent(userId)}&limit=40`)
+          .then(r => r.ok ? r.json() as Promise<{ posts: Array<{ id: string; type: string; content: string | null; rating: number | null; place_name: string | null; media_url: string | null; created_at: string }> }> : { posts: [] })
+          .then(({ posts }) => {
+            if (!posts?.length) return
+            setSocialPosts(prev => {
+              const localIds = new Set(prev.map(p => p.id))
+              const fromRemote = posts
+                .filter(p => !localIds.has(p.id))
+                .map(p => ({
+                  id: p.id,
+                  type: (p.type === 'photo' || p.type === 'video' ? 'photo' : 'review') as 'photo' | 'review',
+                  text: p.content || '',
+                  place: p.place_name ?? undefined,
+                  imageDataUrl: p.media_url ?? undefined,
+                  rating: p.rating ?? undefined,
+                  createdAt: p.created_at,
+                }))
+              return fromRemote.length ? [...fromRemote, ...prev] : prev
+            })
+          })
+          .catch(() => undefined)
+      })
+    }
     setInstagramUrl(social.instagramUrl || '')
     setTiktokUrl(social.tiktokUrl || '')
     setWebsiteUrl(social.websiteUrl || '')
@@ -944,15 +985,17 @@ export function ProfileView({
         </Sheet>
 
         <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
-          <SheetContent side="right" className="flex h-[100dvh] w-full flex-col gap-0 border-l border-orange-100 p-0 sm:max-w-md">
-            <SheetHeader className="border-b border-orange-100 px-4 py-3 text-left">
-              <SheetTitle className="text-lg font-bold">Ajustes</SheetTitle>
-              <p className="text-xs font-normal text-muted-foreground">
-                Ubicación, gustos, cuenta, progreso y comunidad
-              </p>
-            </SheetHeader>
+          <SheetContent side="bottom" className="h-[92dvh] rounded-t-3xl flex flex-col gap-0 p-0 overflow-hidden">
+            <div className="flex items-center justify-between border-b border-orange-100 px-5 py-3.5 shrink-0">
+              <div>
+                <SheetTitle className="text-lg font-bold">Ajustes</SheetTitle>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Ubicación, gustos, cuenta, progreso y comunidad
+                </p>
+              </div>
+            </div>
             <ScrollArea className="min-h-0 flex-1">
-              <div className="space-y-5 p-4 pb-20">
+              <div className="w-full space-y-5 p-4 pb-8 max-w-lg mx-auto">
             <Card className="border-orange-100/80 bg-gradient-to-br from-orange-50/40 to-transparent">
               <CardContent className="space-y-2 py-4">
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
@@ -979,9 +1022,9 @@ export function ProfileView({
                 { icon: Flame, label: 'Pendientes', value: String(pendingDishes) },
               ].map(({ icon: Icon, label, value, highlight }) => (
                 <Card key={label} className={highlight ? 'border-orange-200 dark:border-orange-800' : ''}>
-                  <CardContent className="flex flex-col items-center gap-1 py-3">
+                  <CardContent className="flex flex-col items-center gap-1 px-1 py-3">
                     <Icon className={`size-4 ${highlight ? 'text-orange-500' : 'text-muted-foreground'}`} />
-                    <p className={`text-lg font-extrabold leading-none ${highlight ? 'text-orange-600 dark:text-orange-400' : ''}`}>{value}</p>
+                    <p className={`text-base font-extrabold leading-none ${highlight ? 'text-orange-600 dark:text-orange-400' : ''}`}>{value}</p>
                     <p className="text-[9px] text-muted-foreground text-center leading-tight">{label}</p>
                   </CardContent>
                 </Card>

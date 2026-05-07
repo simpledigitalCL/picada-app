@@ -37,7 +37,9 @@ export function validateContentPayload(input: UnifiedContentPayload): { ok: true
   const hasMedia = Boolean(input.media?.url)
   const hasComment = Boolean((input.review?.comment || '').trim())
   const hasRating = Number(input.review?.rating || 0) > 0
-  if (!hasMedia && !hasComment && !hasRating) {
+  // new-picada: marcar un lugar como picada es contenido suficiente por sí solo
+  const isNewPicada = input.entry === 'new-picada' && Boolean((input.place?.name || '').trim())
+  if (!hasMedia && !hasComment && !hasRating && !isNewPicada) {
     return { ok: false, error: 'El contenido requiere al menos media, comentario o calificación' }
   }
   return { ok: true }

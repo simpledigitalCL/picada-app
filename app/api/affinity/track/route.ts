@@ -1,8 +1,13 @@
 import { NextResponse } from 'next/server'
 import { requireAuthenticatedUser } from '@/lib/server/auth'
 import { trackUserPlaceAffinity, type AffinityEventType } from '@/lib/user/affinity'
+import { consumeRateLimit, getClientIp } from '@/lib/server/rate-limit'
 
 export async function POST(req: Request) {
+  const ip = getClientIp(req)
+  const rl = consumeRateLimit(`affinity:${ip}`, 60, 60_000)
+  if (!rl.ok) return NextResponse.json({ ok: false, error: 'rate_limited' }, { status: 429 })
+
   const auth = await requireAuthenticatedUser(req)
   if (!auth) return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
 
