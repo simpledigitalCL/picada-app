@@ -597,6 +597,9 @@ export function SocialCommunityFeed({
     if (!token) return
 
     const allTags = [...(post.tags || []), ...(post.mood_tags || [])]
+    if (!isLiked) {
+      window.dispatchEvent(new CustomEvent('picada:like-given'))
+    }
     fetch('/api/likes', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },

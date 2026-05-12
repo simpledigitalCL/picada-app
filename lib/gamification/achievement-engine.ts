@@ -1,5 +1,7 @@
 'use client'
 
+import { getSupabaseBrowserClient } from '@/lib/supabase'
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type Rarity = 'Common' | 'Rare' | 'Epic' | 'Legendary'
@@ -112,9 +114,117 @@ export function loadProgress(challengeId: string): AchievementProgress {
   }
 }
 
-function saveProgress(challengeId: string, progress: AchievementProgress): void {
+function saveProgressLocal(challengeId: string, progress: AchievementProgress): void {
   if (typeof window === 'undefined') return
   window.localStorage.setItem(getProgressKey(challengeId), JSON.stringify(progress))
+}
+
+// ─── Auth helper ──────────────────────────────────────────────────────────────
+
+async function getAuthToken(): Promise<string | null> {
+  try {
+    const supabase = getSupabaseBrowserClient()
+    if (!supabase) return null
+    const { data } = await supabase.auth.getSession()
+    return data.session?.access_token ?? null
+  } catch {
+    return null
+  }
+}
+
+// ─── BD persistence (fire-and-forget) ────────────────────────────────────────
+
+function persistProgressToDB(challengeId: string, progress: AchievementProgress): void {
+  getAuthToken().then(token => {
+    if (!token) return
+    fetch('/api/achievements', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        challengeId,
+        count: progress.count,
+        discoveryShown: progress.discoveryShown,
+        rewardShown: progress.rewardShown,
+        unlockedAt: progress.unlockedAt ?? null,
+      }),
+    }).catch(() => undefined)
+  }).catch(() => undefined)
+}
+
+function saveProgress(challengeId: string, progress: AchievementProgress): void {
+  saveProgressLocal(challengeId, progress)
+  persistProgressToDB(challengeId, progress)
+}
+
+// ─── Sync desde BD al arrancar ────────────────────────────────────────────────
+
+/**
+ * Descarga el progreso guardado en BD y lo fusiona en localStorage.
+ * La BD gana si tiene mayor count o si el logro está desbloqueado allá pero no aquí.
+ * Esto restaura el progreso en nuevos dispositivos o tras limpiar caché.
+ */
+export async function syncAchievementsFromDB(): Promise<void> {
+  if (typeof window === 'undefined') return
+  const token = await getAuthToken()
+  if (!token) return
+
+  try {
+    const res = await fetch('/api/achievements', {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (!res.ok) return
+    const json = (await res.json()) as {
+      ok: boolean
+      achievements: Array<{
+        challenge_id: string
+        count: number
+        discovery_shown: boolean
+        reward_shown: boolean
+        unlocked_at: string | null
+        is_featured: boolean
+      }>
+    }
+    if (!json.ok) return
+
+    for (const row of json.achievements) {
+      const local = loadProgress(row.challenge_id)
+
+      // DB wins if it has higher count or if the reward is unlocked there but not locally
+      const dbWins = row.count > local.count || (row.reward_shown && !local.rewardShown)
+      if (!dbWins) continue
+
+      const merged: AchievementProgress = {
+        count: Math.max(row.count, local.count),
+        discoveryShown: row.discovery_shown || local.discoveryShown,
+        rewardShown: row.reward_shown || local.rewardShown,
+        unlockedAt: row.unlocked_at ?? local.unlockedAt,
+      }
+      saveProgressLocal(row.challenge_id, merged)
+
+      // Restore featured achievement from DB
+      if (row.is_featured && row.reward_shown && row.unlocked_at) {
+        const existing = loadFeaturedAchievement()
+        if (!existing || existing.challengeId !== row.challenge_id) {
+          // We need the challenge config to rebuild the featured object
+          loadChallengesConfig().then(challenges => {
+            const challenge = challenges.find(c => c.id === row.challenge_id)
+            if (!challenge || !row.unlocked_at) return
+            const featured: FeaturedAchievement = {
+              challengeId: challenge.id,
+              title: challenge.title,
+              description: challenge.description,
+              rarity: challenge.rarity,
+              visual: challenge.visual,
+              unlockedAt: row.unlocked_at,
+            }
+            window.localStorage.setItem(FEATURED_KEY, JSON.stringify(featured))
+          }).catch(() => undefined)
+        }
+      }
+    }
+  } catch {
+    // Silent — offline or auth error, localStorage is still valid
+  }
 }
 
 // ─── Restricción de horario ───────────────────────────────────────────────────
@@ -227,6 +337,16 @@ export function equipAchievement(challenge: DynamicChallenge, unlockedAt: string
   }
   window.localStorage.setItem(FEATURED_KEY, JSON.stringify(featured))
   window.dispatchEvent(new CustomEvent('picada:achievement-equipped', { detail: featured }))
+
+  // Persist to DB (fire-and-forget)
+  getAuthToken().then(token => {
+    if (!token) return
+    fetch('/api/achievements/featured', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ challengeId: challenge.id }),
+    }).catch(() => undefined)
+  }).catch(() => undefined)
 }
 
 // ─── Vista general de progreso ────────────────────────────────────────────────
@@ -243,6 +363,7 @@ export async function getAllAchievementProgress(): Promise<
 /**
  * Inicializa el motor escuchando eventos del sistema ya existentes.
  * Llámalo desde page.tsx junto a initGamificationEvents().
+ * Sincroniza el progreso desde la BD al arrancar (restaura logros en dispositivos nuevos).
  */
 export function initAchievementEngine(userId: string): () => void {
   const handlers: Array<{ event: string; fn: EventListener }> = []
@@ -258,13 +379,16 @@ export function initAchievementEngine(userId: string): () => void {
   on('picada:review-published', 'review_written')
   on('picada:photo-uploaded', 'photo_uploaded')
   on('picada:scan-complete', 'scan_complete')
-  on('picada:vote-cast', 'picada_voted')
+  on('picada:vote-granted', 'picada_voted')
   on('picada:map-viewed', 'map_view')
   on('picada:like-given', 'like_given')
-  on('picada:place-visited', 'place_visited')
+  on('picada:place-visited', 'place_view')
   on('picada:app-opened', 'app_open')
   on('picada:mood-used', 'mood_used')
   on('picada:profile-shared', 'profile_shared')
+
+  // Sync progress from DB on init (restores progress after cache clear or new device)
+  void syncAchievementsFromDB()
 
   // Exponer API global para que un Agente IA pueda recargar el config en caliente
   if (typeof window !== 'undefined') {
@@ -272,6 +396,7 @@ export function initAchievementEngine(userId: string): () => void {
       invalidateCache: invalidateConfigCache,
       reloadConfig: loadChallengesConfig,
       trackAction: (type: string, meta?: Record<string, unknown>) => trackAction(userId, type, meta),
+      syncFromDB: syncAchievementsFromDB,
     }
   }
 

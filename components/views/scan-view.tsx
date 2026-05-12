@@ -64,6 +64,7 @@ export function ScanView() {
         }
         if (data.error) throw new Error(data.error)
         setResult(data)
+        window.dispatchEvent(new CustomEvent('picada:scan-complete'))
       } catch {
         setScannerError('No se pudo analizar la imagen. Intenta nuevamente.')
         setResult(null)

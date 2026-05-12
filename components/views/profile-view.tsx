@@ -672,10 +672,12 @@ export function ProfileView({
           text: 'Mira mi perfil gastronómico en Picada',
           url: publicProfileUrl,
         })
+        window.dispatchEvent(new CustomEvent('picada:profile-shared'))
       } else if (typeof navigator !== 'undefined' && publicProfileUrl) {
         await navigator.clipboard.writeText(publicProfileUrl)
         setSaved(true)
         window.setTimeout(() => setSaved(false), 1600)
+        window.dispatchEvent(new CustomEvent('picada:profile-shared'))
       }
     } catch {
       /* cancelado o sin permiso */
@@ -1301,6 +1303,7 @@ export function ProfileView({
                                 setSaved(true)
                                 window.setTimeout(() => setSaved(false), 1600)
                               }
+                              window.dispatchEvent(new CustomEvent('picada:profile-shared'))
                             } catch { /* cancelled */ }
                           }}
                         >

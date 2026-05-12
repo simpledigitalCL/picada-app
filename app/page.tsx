@@ -264,6 +264,8 @@ export default function Home() {
         window.localStorage.setItem(VISITED_KEY, JSON.stringify(visited.slice(0, 50)))
       }
     } catch { /* ignore */ }
+    // Achievement: contar vistas de locales
+    window.dispatchEvent(new CustomEvent('picada:place-visited', { detail: { placeId: r.id, placeName: r.name } }))
   }
   const handleClose  = () => {
     if (pickerOpen || pickerBlock) return
@@ -310,6 +312,7 @@ export default function Home() {
     setSelected(null)
     setTab(t)
     if (t === 'profile') setProfileSection('profile')
+    if (t === 'map') window.dispatchEvent(new CustomEvent('picada:map-viewed'))
   }
 
   const handleFabAction = async (type: PostFormType) => {
