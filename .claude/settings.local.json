@@ -54,7 +54,8 @@
       "mcp__supabase__list_migrations",
       "Bash(grep -n \"AchievementToast\\\\|SonnerToaster\\\\|</div>$\" /Users/inter-mac-602/Documents/GitHub/picada-app/app/page.tsx)",
       "Bash(grep -n \"AllAchievementsSheet\\\\|</div>$\" /Users/inter-mac-602/Documents/GitHub/picada-app/components/views/profile-feedie-chrome.tsx)",
-      "mcp__linear-server__save_comment"
+      "mcp__linear-server__save_comment",
+      "Bash(snap --version)"
     ]
   },
   "enableAllProjectMcpServers": true,

@@ -1,7 +1,7 @@
 export const FOOD_LIKES_CATALOG = [
   'picada', 'comida chilena', 'mariscos', 'carne', 'sushi', 'ramen', 'vegano', 'vegetariano',
   'keto', 'sin gluten', 'sin lactosa', 'cafetería', 'pastelería', 'pizza', 'hamburguesas',
-  'tacos', 'poke', 'comida coreana', 'comida japonesa', 'comida peruana', 'fusión',
+  'tacos', 'poke', 'mexicano', 'comida coreana', 'coreano', 'comida japonesa', 'comida peruana', 'fusión',
   'desayuno', 'brunch', 'postres', 'street food', 'alta cocina',
 ]
 

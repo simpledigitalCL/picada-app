@@ -92,16 +92,81 @@ export function isStreakAtRisk(): boolean {
   return false
 }
 
+const BADGES_KEY = 'picada.badges.v1'
+
+type BadgeStore = Record<string, { unlockedAt: string }>
+
+function loadBadgeStore(): BadgeStore {
+  if (typeof window === 'undefined') return {}
+  try {
+    return JSON.parse(window.localStorage.getItem(BADGES_KEY) ?? '{}') as BadgeStore
+  } catch { return {} }
+}
+
+function saveBadgeStore(store: BadgeStore): void {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(BADGES_KEY, JSON.stringify(store))
+}
+
 export function loadBadges(): Badge[] {
-  return BADGE_DEFS.map(b => ({ ...b, unlocked: false }))
+  const store = loadBadgeStore()
+  return BADGE_DEFS.map(b => ({
+    ...b,
+    unlocked: Boolean(store[b.id]),
+    unlockedAt: store[b.id]?.unlockedAt,
+  }))
 }
 
-export function unlockBadge(_id: BadgeId): boolean {
-  return false
+export function unlockBadge(id: BadgeId): boolean {
+  const store = loadBadgeStore()
+  if (store[id]) return false // ya estaba desbloqueada
+
+  const unlockedAt = new Date().toISOString()
+  saveBadgeStore({ ...store, [id]: { unlockedAt } })
+
+  // Sync a Supabase en background (sin bloquear)
+  fetch('/api/badges', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ badgeId: id, unlockedAt }),
+  }).catch(() => undefined)
+
+  return true
 }
 
-export function checkAndUnlockBadges(_points: number, _streakDays: number): BadgeId[] {
-  return []
+export function checkAndUnlockBadges(points: number, streakDays: number): BadgeId[] {
+  const store = loadBadgeStore()
+  const newlyUnlocked: BadgeId[] = []
+
+  const check = (id: BadgeId, condition: boolean) => {
+    if (condition && !store[id]) {
+      unlockBadge(id)
+      newlyUnlocked.push(id)
+    }
+  }
+
+  check('racha_caliente', streakDays >= 7)
+  check('picada_rey', points >= 5000)
+
+  return newlyUnlocked
+}
+
+/** Llama al hacer login — descarga insignias de Supabase y actualiza localStorage */
+export async function syncBadgesFromSupabase(): Promise<void> {
+  try {
+    const res = await fetch('/api/badges')
+    if (!res.ok) return
+    const json = (await res.json()) as { ok: boolean; badges: Array<{ badge_id: string; unlocked_at: string }> }
+    if (!json.ok || !Array.isArray(json.badges)) return
+
+    const store = loadBadgeStore()
+    for (const row of json.badges) {
+      if (!store[row.badge_id]) {
+        store[row.badge_id] = { unlockedAt: row.unlocked_at }
+      }
+    }
+    saveBadgeStore(store)
+  } catch { /* offline — localStorage sigue siendo válido */ }
 }
 
 export function loadStreak(): StreakData {

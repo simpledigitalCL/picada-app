@@ -11,6 +11,7 @@ import { grantPoints, tickStreak } from '@/lib/gamification/core'
 const LIKES_OPTIONS = [
   'sushi', 'pizza', 'completo', 'ramen', 'ceviche', 'empanadas',
   'hamburguesa', 'tacos', 'pasta', 'asado', 'mariscos', 'vegano',
+  'comida coreana',
 ]
 
 const RESTRICTION_OPTIONS = [

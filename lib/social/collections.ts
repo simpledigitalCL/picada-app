@@ -80,14 +80,15 @@ export function loadCollections(): UserCollection[] {
       window.localStorage.setItem(COLLECTIONS_KEY, JSON.stringify(DEFAULT_COLLECTIONS))
       return DEFAULT_COLLECTIONS
     }
-    // Merge: garantiza que los defaults siempre existan, preservando sus lugares
+    // Merge: garantiza que los defaults siempre existan, preservando sus lugares.
+    // Busca por id primero (pre-sync) y luego por nombre+isDefault (post-sync con UUID de Supabase).
     const merged = DEFAULT_COLLECTIONS.map(def => {
-      const found = parsed.find(c => c.id === def.id)
+      const found = parsed.find(c => c.id === def.id || (c.isDefault && c.name === def.name))
       return found ? { ...def, ...found, isDefault: true } : def
     })
-    // Agrega colecciones de usuario que no son defaults
+    // Agrega solo colecciones no-default que no fueron ya mergeadas
     for (const col of parsed) {
-      if (!merged.find(c => c.id === col.id)) merged.push(col)
+      if (!col.isDefault && !merged.find(c => c.id === col.id)) merged.push(col)
     }
     return merged.sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99))
   } catch { return DEFAULT_COLLECTIONS }

@@ -3,15 +3,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { getSupabaseBrowserClient } from '@/lib/supabase'
 import {
+  ArrowLeft,
   Bookmark,
   Camera,
   CheckCircle2,
+  ChevronRight,
   Copy,
   Flame,
   Globe,
   Grid3X3,
   Instagram,
   Link2,
+  Lock,
   MapPin,
   MessageCircle,
   Music2,
@@ -20,6 +23,7 @@ import {
   Star,
   Trophy,
   TrendingUp,
+  User,
   Zap,
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -454,6 +458,7 @@ interface ProfileViewProps {
   /** True cuando la pestaña inferior Social está visible (para abrir siempre en Foodie). */
   profileTabActive: boolean
   onSelectPlace?: (r: import('@/lib/places/restaurants').Restaurant) => void
+  isAuthed?: boolean
 }
 
 export function ProfileView({
@@ -466,6 +471,7 @@ export function ProfileView({
   onSectionChange,
   profileTabActive,
   onSelectPlace,
+  isAuthed = false,
 }: ProfileViewProps) {
   const [puntos, setPuntos] = useState(0)
   const [likes, setLikes] = useState<string[]>([])
@@ -497,6 +503,7 @@ export function ProfileView({
   /** Pestañas principales estilo Feedie (lo que ven quienes siguen tu perfil). */
   const [foodieTab, setFoodieTab] = useState<'feed' | 'reels' | 'picadas' | 'reviews'>('feed')
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsSubView, setSettingsSubView] = useState<string | null>(null)
   const [profileLens, setProfileLens] = useState<ProfileLens>('foodie')
   const wasProfileTabActive = useRef(false)
   const [selectedPhoto, setSelectedPhoto] = useState<(typeof socialPosts)[0] | null>(null)
@@ -597,6 +604,43 @@ export function ProfileView({
         setPendingDishes(0)
       })
   }, [])
+
+  useEffect(() => {
+    if (!isAuthed) return
+    const supabase = getSupabaseBrowserClient()
+    if (!supabase) return
+    supabase.auth.getSession().then(({ data: sessionData }) => {
+      const userId = sessionData.session?.user?.id
+      if (!userId) return
+      supabase.from('profiles').select('username, avatar_url').eq('id', userId).single()
+        .then(({ data: profile }) => {
+          if (profile?.username) setUsername(profile.username)
+          if (profile?.avatar_url) setAvatarDataUrl(profile.avatar_url)
+        })
+      // Recargar posts del usuario con el UUID real de Supabase
+      fetch(`/api/social-feed?user_id=${encodeURIComponent(userId)}&limit=60`)
+        .then(r => r.ok ? r.json() as Promise<{ posts: Array<{ id: string; type: string; content: string | null; rating: number | null; place_name: string | null; media_url: string | null; created_at: string }> }> : { posts: [] })
+        .then(({ posts }) => {
+          if (!posts?.length) return
+          setSocialPosts(prev => {
+            const localIds = new Set(prev.map(p => p.id))
+            const fromRemote = posts
+              .filter(p => !localIds.has(p.id))
+              .map(p => ({
+                id: p.id,
+                type: (p.type === 'video' ? 'photo' : p.type === 'photo' ? 'photo' : 'review') as 'photo' | 'review',
+                text: p.content || '',
+                place: p.place_name ?? undefined,
+                imageDataUrl: p.media_url ?? undefined,
+                rating: p.rating ?? undefined,
+                createdAt: p.created_at,
+              }))
+            return fromRemote.length ? [...fromRemote, ...prev] : prev
+          })
+        })
+        .catch(() => undefined)
+    })
+  }, [isAuthed])
 
   useEffect(() => {
     const updateInfluence = () => {
@@ -812,8 +856,7 @@ export function ProfileView({
 
         {foodieTab === 'feed' ? (
           <div className="space-y-0">
-            {/* Photo grid — Instagram style */}
-            {socialPosts.filter(p => p.imageDataUrl).length === 0 ? (
+            {socialPosts.length === 0 ? (
               <motion.div
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -823,16 +866,17 @@ export function ProfileView({
                   <span className="text-4xl">📸</span>
                 </div>
                 <div className="space-y-1">
-                  <p className="font-bold text-base">Sin fotos aún</p>
+                  <p className="font-bold text-base">Sin publicaciones aún</p>
                   <p className="text-sm text-muted-foreground max-w-[260px] mx-auto">
-                    Usa el botón <span className="font-semibold text-orange-500">+</span> para subir fotos y reels de tus experiencias gastronómicas.
+                    Usa el botón <span className="font-semibold text-orange-500">+</span> para subir fotos, reels y reseñas de tus experiencias gastronómicas.
                   </p>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Gana <span className="font-semibold text-orange-500">+10 XP</span> por tu primera foto
+                  Gana <span className="font-semibold text-orange-500">+10 XP</span> por tu primera publicación
                 </p>
               </motion.div>
-            ) : (
+            ) : socialPosts.some(p => p.imageDataUrl) ? (
+              /* Grid de fotos/videos */
               <div className="grid grid-cols-3 gap-px bg-muted/30">
                 {socialPosts.filter(p => p.imageDataUrl).map(item => (
                   <button
@@ -861,37 +905,83 @@ export function ProfileView({
                   </button>
                 ))}
               </div>
+            ) : (
+              /* Sin fotos — muestra reseñas de texto */
+              <div className="space-y-3 px-0.5 pt-2">
+                {socialPosts.map(item => (
+                  <Card key={item.id}>
+                    <CardContent className="space-y-1.5 py-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <Badge variant="secondary" className="text-[10px]">✍️ {item.type === 'review' ? 'Reseña' : 'Post'}</Badge>
+                        {item.createdAt ? (
+                          <span className="text-[10px] text-muted-foreground">
+                            {new Date(item.createdAt).toLocaleDateString('es-CL', { day: 'numeric', month: 'short' })}
+                          </span>
+                        ) : null}
+                      </div>
+                      {item.place && <p className="text-xs font-semibold text-orange-600">{item.place}</p>}
+                      {item.text ? <p className="text-sm leading-snug">{item.text}</p> : null}
+                      {item.rating ? (
+                        <p className="text-sm font-semibold tracking-wide text-amber-600">
+                          {'★'.repeat(item.rating)}{'☆'.repeat(5 - item.rating)}
+                        </p>
+                      ) : null}
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
             )}
           </div>
         ) : foodieTab === 'reels' ? (
           <div className="space-y-3 px-0.5">
-            <p className="text-xs text-muted-foreground">
-              Favoritos de Reels: lo que marcaste para volver a ver o compartir.
-            </p>
-            {favoriteItems.length === 0 ? (
-              <Card>
-                <CardContent className="py-10 text-center text-sm text-muted-foreground">
-                  Aún no tienes reels guardados. Ve a la pestaña Reels de la app y marca favoritos.
-                </CardContent>
-              </Card>
-            ) : (
-              <div className="grid grid-cols-3 gap-2">
-                {favoriteItems.map(f => (
-                  <a
-                    key={f.id}
-                    href={f.sourceUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="relative flex aspect-[3/4] flex-col justify-end overflow-hidden rounded-xl border border-orange-100 bg-gradient-to-b from-orange-100 to-muted p-2 shadow-sm transition hover:border-orange-300"
-                  >
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/20">
-                      <Play className="size-9 text-white drop-shadow-lg" />
-                    </div>
-                    <p className="relative z-[1] line-clamp-3 text-[10px] font-bold leading-tight text-white drop-shadow-md">{f.title}</p>
-                  </a>
-                ))}
-              </div>
-            )}
+            {(() => {
+              const ownVideos = socialPosts.filter(p => p.imageDataUrl?.startsWith('data:video') || p.imageDataUrl?.includes('/video/'))
+              return ownVideos.length > 0 ? (
+                <div className="grid grid-cols-3 gap-2">
+                  {ownVideos.map(item => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setSelectedPhoto(item)}
+                      className="relative flex aspect-[3/4] flex-col justify-end overflow-hidden rounded-xl bg-black/80"
+                    >
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <Play className="size-9 text-white/90 drop-shadow-lg" />
+                      </div>
+                      {item.place && (
+                        <p className="relative z-[1] line-clamp-2 px-2 pb-2 text-[10px] font-bold leading-tight text-white drop-shadow-md">{item.place}</p>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              ) : favoriteItems.length > 0 ? (
+                <>
+                  <p className="text-xs text-muted-foreground">Reels guardados de la comunidad</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {favoriteItems.map(f => (
+                      <a
+                        key={f.id}
+                        href={f.sourceUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="relative flex aspect-[3/4] flex-col justify-end overflow-hidden rounded-xl border border-orange-100 bg-gradient-to-b from-orange-100 to-muted p-2 shadow-sm transition hover:border-orange-300"
+                      >
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/20">
+                          <Play className="size-9 text-white drop-shadow-lg" />
+                        </div>
+                        <p className="relative z-[1] line-clamp-3 text-[10px] font-bold leading-tight text-white drop-shadow-md">{f.title}</p>
+                      </a>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <Card>
+                  <CardContent className="py-10 text-center text-sm text-muted-foreground">
+                    Aún no tienes reels. Sube un video desde el botón + o guarda reels de la comunidad.
+                  </CardContent>
+                </Card>
+              )
+            })()}
           </div>
         ) : foodieTab === 'picadas' ? (
           <VotedPicadasTab />
@@ -986,371 +1076,454 @@ export function ProfileView({
           </SheetContent>
         </Sheet>
 
-        <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
+        <Sheet open={settingsOpen} onOpenChange={(open) => { setSettingsOpen(open); if (!open) setSettingsSubView(null) }}>
           <SheetContent side="bottom" className="h-[92dvh] rounded-t-3xl flex flex-col gap-0 p-0 overflow-hidden">
-            <div className="flex items-center justify-between border-b border-orange-100 px-5 py-3.5 shrink-0">
-              <div>
-                <SheetTitle className="text-lg font-bold">Ajustes</SheetTitle>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Ubicación, gustos, cuenta, progreso y comunidad
-                </p>
-              </div>
+            {/* Header */}
+            <div className="flex items-center gap-2 border-b border-orange-100 px-4 py-3.5 shrink-0">
+              {settingsSubView && (
+                <button onClick={() => setSettingsSubView(null)} className="flex items-center justify-center size-8 rounded-full hover:bg-muted/50 -ml-1 shrink-0">
+                  <ArrowLeft className="size-5" />
+                </button>
+              )}
+              <SheetTitle className="text-lg font-bold">
+                {settingsSubView === 'perfil' ? 'Perfil público'
+                  : settingsSubView === 'cuenta' ? 'Cuenta'
+                  : settingsSubView === 'gustos' ? 'Gustos y filtros'
+                  : settingsSubView === 'ubicacion' ? 'Ubicación'
+                  : settingsSubView === 'favoritos' ? 'Mis favoritos'
+                  : settingsSubView === 'progreso' ? 'XP y nivel'
+                  : settingsSubView === 'logros' ? 'Logros'
+                  : settingsSubView === 'desafios' ? 'Desafíos'
+                  : settingsSubView === 'leaderboard' ? 'Leaderboard'
+                  : settingsSubView === 'impacto' ? 'Mi Impacto'
+                  : settingsSubView === 'historial' ? 'Historial'
+                  : 'Ajustes'}
+              </SheetTitle>
             </div>
+
             <ScrollArea className="min-h-0 flex-1">
-              <div className="w-full space-y-5 p-4 pb-8 max-w-lg mx-auto">
-            <Card className="border-orange-100/80 bg-gradient-to-br from-orange-50/40 to-transparent">
-              <CardContent className="space-y-2 py-4">
-                <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <span className="flex items-center gap-1 font-medium text-foreground">
-                    <Zap className="size-3.5 text-orange-500" />
-                    Progreso de nivel
-                  </span>
-                  {siguiente ? (
-                    <span>
-                      {siguiente.nombre} {siguiente.emoji} en {siguiente.min - puntos} XP
-                    </span>
-                  ) : null}
-                </div>
-                <Progress value={progreso} className="h-2.5" />
-                <LevelProgressHint points={puntos} />
-              </CardContent>
-            </Card>
+              <div className="w-full pb-8">
 
-            <div className="grid grid-cols-4 gap-2">
-              {[
-                { icon: MessageCircle, label: 'Reseñas', value: String(socialPosts.filter(p => p.type === 'review').length + reviewsText.split('\n').filter(Boolean).length), highlight: true },
-                { icon: Star, label: 'Likes', value: String(likesCount) },
-                { icon: Camera, label: 'Favoritos', value: String(favoritesCount) },
-                { icon: Flame, label: 'Pendientes', value: String(pendingDishes) },
-              ].map(({ icon: Icon, label, value, highlight }) => (
-                <Card key={label} className={highlight ? 'border-orange-200 dark:border-orange-800' : ''}>
-                  <CardContent className="flex flex-col items-center gap-1 px-1 py-3">
-                    <Icon className={`size-4 ${highlight ? 'text-orange-500' : 'text-muted-foreground'}`} />
-                    <p className={`text-base font-extrabold leading-none ${highlight ? 'text-orange-600 dark:text-orange-400' : ''}`}>{value}</p>
-                    <p className="text-[9px] text-muted-foreground text-center leading-tight">{label}</p>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+                {/* ── MAIN LIST ── */}
+                {settingsSubView === null && (
+                  <div className="space-y-1 pt-2">
 
-            <StreakBanner current={streak.current} longest={streak.longest} />
-
-            <Separator />
-
-            {/* Logros dinámicos desde JSON */}
-            <DynamicAchievementsSection />
-
-            <Separator />
-
-            {/* Desafíos dinámicos */}
-            <div>
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="font-bold text-base">Desafíos de hoy</h2>
-                <Badge variant="secondary" className="text-xs">
-                  <Trophy className="size-3 mr-1" />
-                  {challenges.filter(d => d.completed).length}/{challenges.length}
-                </Badge>
-              </div>
-              <div className="space-y-3">
-                <AnimatePresence>
-                  {challenges.map(c => (
-                    <motion.div
-                      key={c.id}
-                      layout
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                    >
-                      <ChallengeCard challenge={c} onComplete={handleChallengeAction} />
-                    </motion.div>
-                  ))}
-                </AnimatePresence>
-              </div>
-            </div>
-
-            <Separator />
-
-            {/* Leaderboard local */}
-            <div>
-              <LeaderboardPanel locationQuery={locationQuery} />
-            </div>
-
-            <Separator />
-
-            {/* Historial de visitas */}
-            <VisitedHistory />
-
-            <Separator />
-
-            <div>
-              <h2 className="font-bold text-base mb-3">Mi Impacto</h2>
-              <CreatorDashboard
-                locationQuery={locationQuery}
-                influencePoints={influencePoints}
-                recommendationsClicks={recommendationClicks}
-                inspectorLevel={nivel.nombre}
-                topDiscovery={socialPosts[0]?.place || favoriteItems[0]?.title}
-              />
-            </div>
-
-            <Separator />
-            <div>
-              <h2 className="font-bold text-base mb-3">Cuenta y registro</h2>
-              <Card>
-                <CardContent className="py-4">
-                  <AuthQuickRegister />
-                </CardContent>
-              </Card>
-            </div>
-
-            <Separator />
-            <div>
-              <h2 className="font-bold text-base mb-3">Ubicación inteligente</h2>
-              <Card>
-                <CardContent className="py-4 space-y-3">
-                  <div className="flex items-center justify-between rounded-lg border px-3 py-2">
-                    <div className="text-xs">
-                      <p className="font-semibold">Usar mi ubicación actual</p>
-                      <p className="text-muted-foreground">Personaliza reels, mapa y publicaciones</p>
-                    </div>
-                    <Switch
-                      checked={locationMode === 'auto'}
-                      onCheckedChange={checked => onLocationModeChange(checked ? 'auto' : 'manual')}
-                    />
-                  </div>
-                  <LocationAutocomplete value={locationQuery} onChange={onLocationChange} />
-                  <Button variant="outline" className="w-full" onClick={onUseCurrentLocation}>
-                    Actualizar con mi ubicación ahora
-                  </Button>
-                </CardContent>
-              </Card>
-            </div>
-
-            <Separator />
-            <div>
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="font-bold text-base">Tus gustos gastronómicos</h2>
-                {saved && <Badge variant="secondary" className="text-xs">Guardado ✓</Badge>}
-              </div>
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm">Personalización del feed</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <TagAutocompleteInput label="Gustos gastronómicos" values={likes} suggestions={FOOD_LIKES_CATALOG} onChange={setLikes} />
-                  <TagAutocompleteInput label="Restricciones alimenticias" values={restrictions} suggestions={DIETARY_RESTRICTIONS_CATALOG} onChange={setRestrictions} />
-                  <TagAutocompleteInput label="No me gusta" values={dislikes} suggestions={FOOD_DISLIKES_CATALOG} onChange={setDislikes} />
-                  <div className="space-y-1.5">
-                    <p className="text-xs text-muted-foreground">Religión (opcional)</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {RELIGION_CATALOG.map(r => (
-                        <Badge
-                          key={r}
-                          variant={religion === r ? 'default' : 'outline'}
-                          className="cursor-pointer"
-                          onClick={() => {
-                            setReligion(r)
-                            const adds = RELIGION_RESTRICTIONS[r] || []
-                            setRestrictions(prev => [...new Set([...prev, ...adds])])
-                          }}
-                        >
-                          {r}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    <Badge variant="outline" className="text-xs">Gustos: {prefStats.likes}</Badge>
-                    <Badge variant="outline" className="text-xs">Restricciones: {prefStats.restrictions}</Badge>
-                    <Badge variant="outline" className="text-xs">No me gusta: {prefStats.dislikes}</Badge>
-                  </div>
-                  <Button className="w-full" onClick={() => {
-                    savePreferences({ likes, restrictions, dislikes, religion })
-                    setSaved(true)
-                    window.setTimeout(() => setSaved(false), 1600)
-                  }}>
-                    Guardar preferencias
-                  </Button>
-                </CardContent>
-              </Card>
-            </div>
-
-            <Separator />
-            <div>
-              <h2 className="font-bold text-base mb-3">Tus favoritos</h2>
-              <Card>
-                <CardContent className="py-4 space-y-3">
-                  {favoriteItems.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">Marca favoritos en Reels y aparecerán aquí.</p>
-                  ) : (
-                    favoriteItems.slice(0, 8).map(item => (
-                      <div key={item.id} className="flex items-center justify-between gap-2 border-b last:border-b-0 pb-2 last:pb-0">
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold truncate">{item.title}</p>
-                          <p className="text-xs text-muted-foreground truncate">{item.author}</p>
+                    {/* CUENTA */}
+                    <p className="px-4 pt-4 pb-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Cuenta</p>
+                    <div className="mx-3 overflow-hidden rounded-2xl border divide-y bg-card">
+                      <button onClick={() => setSettingsSubView('perfil')} className="flex items-center gap-3 w-full px-4 py-3.5 text-left hover:bg-muted/30 active:bg-muted/50 transition-colors">
+                        <div className="size-8 rounded-lg bg-blue-500 flex items-center justify-center shrink-0">
+                          <User className="size-4 text-white" />
                         </div>
-                        <Button size="sm" variant="outline" asChild>
-                          <a href={item.sourceUrl} target="_blank" rel="noreferrer">Ver</a>
-                        </Button>
-                      </div>
-                    ))
-                  )}
-                  <Button variant="secondary" className="w-full gap-2" onClick={async () => {
-                    const text = favoriteItems.map(f => `- ${f.title} (${f.sourceUrl})`).join('\n') || 'Sin favoritos'
-                    await navigator.clipboard.writeText(text)
-                  }}>
-                    <Copy className="size-4" />
-                    Copiar lista de favoritos
-                  </Button>
-                </CardContent>
-              </Card>
-            </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium">Perfil público</p>
+                          <p className="text-xs text-muted-foreground truncate">@{username || 'usuario'}</p>
+                        </div>
+                        <ChevronRight className="size-4 text-muted-foreground shrink-0" />
+                      </button>
+                      <button onClick={() => setSettingsSubView('cuenta')} className="flex items-center gap-3 w-full px-4 py-3.5 text-left hover:bg-muted/30 active:bg-muted/50 transition-colors">
+                        <div className="size-8 rounded-lg bg-gray-500 flex items-center justify-center shrink-0">
+                          <Lock className="size-4 text-white" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium">Cuenta</p>
+                          <p className="text-xs text-muted-foreground">Iniciar sesión y registro</p>
+                        </div>
+                        <ChevronRight className="size-4 text-muted-foreground shrink-0" />
+                      </button>
+                    </div>
 
-            <Separator />
-            <div>
-              <h2 className="font-bold text-base mb-3">Perfil público y compartir</h2>
-              <Card>
-                <CardContent className="py-4 space-y-3">
-                  <div className="space-y-1.5">
-                    <p className="text-xs text-muted-foreground">Usuario público</p>
-                    <Input value={username} onChange={e => setUsername(e.target.value)} placeholder="usuario" />
-                  </div>
-                  <div className="space-y-1.5">
-                    <p className="text-xs text-muted-foreground">Bio</p>
-                    <Textarea value={bio} onChange={e => setBio(e.target.value)} placeholder="Cuéntale a otros qué te gusta comer..." />
-                  </div>
-                  <div className="space-y-1.5">
-                    <p className="text-xs text-muted-foreground">Foto de perfil</p>
-                    <Input type="file" accept="image/*" onChange={e => {
-                      const file = e.target.files?.[0]
-                      if (!file) return
-                      const reader = new FileReader()
-                      reader.onload = () => { if (typeof reader.result === 'string') setAvatarDataUrl(reader.result) }
-                      reader.readAsDataURL(file)
-                    }} />
-                  </div>
-                  <div className="grid grid-cols-1 gap-2">
-                    <div className="relative">
-                      <Instagram className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-                      <Input value={instagramUrl} onChange={e => setInstagramUrl(e.target.value)} placeholder="Instagram URL" className="pl-9" />
+                    {/* PREFERENCIAS */}
+                    <p className="px-4 pt-5 pb-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Preferencias</p>
+                    <div className="mx-3 overflow-hidden rounded-2xl border divide-y bg-card">
+                      <button onClick={() => setSettingsSubView('gustos')} className="flex items-center gap-3 w-full px-4 py-3.5 text-left hover:bg-muted/30 active:bg-muted/50 transition-colors">
+                        <div className="size-8 rounded-lg bg-orange-500 flex items-center justify-center shrink-0 text-base leading-none">🍽️</div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium">Gustos y filtros</p>
+                          <p className="text-xs text-muted-foreground">{prefStats.likes} gustos · {prefStats.restrictions} restricciones</p>
+                        </div>
+                        <ChevronRight className="size-4 text-muted-foreground shrink-0" />
+                      </button>
+                      <button onClick={() => setSettingsSubView('ubicacion')} className="flex items-center gap-3 w-full px-4 py-3.5 text-left hover:bg-muted/30 active:bg-muted/50 transition-colors">
+                        <div className="size-8 rounded-lg bg-green-500 flex items-center justify-center shrink-0">
+                          <MapPin className="size-4 text-white" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium">Ubicación</p>
+                          <p className="text-xs text-muted-foreground truncate">{locationQuery || 'Manual'}</p>
+                        </div>
+                        <ChevronRight className="size-4 text-muted-foreground shrink-0" />
+                      </button>
+                      <button onClick={() => setSettingsSubView('favoritos')} className="flex items-center gap-3 w-full px-4 py-3.5 text-left hover:bg-muted/30 active:bg-muted/50 transition-colors">
+                        <div className="size-8 rounded-lg bg-yellow-500 flex items-center justify-center shrink-0">
+                          <Star className="size-4 text-white" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium">Mis favoritos</p>
+                          <p className="text-xs text-muted-foreground">{favoriteItems.length} elementos guardados</p>
+                        </div>
+                        <ChevronRight className="size-4 text-muted-foreground shrink-0" />
+                      </button>
                     </div>
-                    <div className="relative">
-                      <Music2 className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-                      <Input value={tiktokUrl} onChange={e => setTiktokUrl(e.target.value)} placeholder="TikTok URL" className="pl-9" />
-                    </div>
-                    <div className="relative">
-                      <Link2 className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-                      <Input value={websiteUrl} onChange={e => setWebsiteUrl(e.target.value)} placeholder="Sitio web / Linktree" className="pl-9" />
-                    </div>
-                  </div>
-                  <div className="rounded-xl bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-800 px-3 py-2.5 space-y-1">
-                    <p className="text-xs font-semibold text-orange-700 dark:text-orange-400 flex items-center gap-1.5">
-                      <MessageCircle className="size-3.5" />
-                      {socialPosts.length > 0 ? `${socialPosts.length} reseña${socialPosts.length > 1 ? 's' : ''} publicada${socialPosts.length > 1 ? 's' : ''}` : 'Aún sin reseñas'}
-                    </p>
-                    <p className="text-[11px] text-muted-foreground">
-                      Tus reseñas se guardan automáticamente cuando publicas desde el botón <span className="font-semibold text-orange-500">+</span>. Aparecen en tu feed.
-                    </p>
-                  </div>
-                  <div className="flex items-center justify-between rounded-lg border px-3 py-2">
-                    <div className="text-xs">
-                      <p className="font-semibold">Perfil público</p>
-                      <p className="text-muted-foreground">Otros pueden ver tus reseñas y favoritos</p>
-                    </div>
-                    <Switch checked={isPublic} onCheckedChange={setIsPublic} />
-                  </div>
-                  <Button className="w-full gap-2 rounded-xl" onClick={() => {
-                    saveProfileSocialSettings({ username, bio, avatarDataUrl, instagramUrl, tiktokUrl, websiteUrl, isPublic, reviews: reviewsText.split('\n').map(s => s.trim()).filter(Boolean), visitedPlaces: visitedText.split('\n').map(s => s.trim()).filter(Boolean), socialPosts })
-                    setSaved(true)
-                    window.setTimeout(() => setSaved(false), 1600)
-                  }}>
-                    <Globe className="size-4" />
-                    Guardar perfil público
-                  </Button>
 
-                  {isPublic && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 6 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="rounded-xl border-2 border-dashed border-orange-300 dark:border-orange-700 bg-orange-50/50 dark:bg-orange-950/10 p-4 space-y-3"
-                    >
-                      <div className="text-center">
-                        <p className="text-sm font-bold">¡Tu perfil es público! 🎉</p>
-                        <p className="text-xs text-muted-foreground mt-0.5">Compártelo con amigos y construye tu reputación gastronómica</p>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="gap-1.5 rounded-xl border-green-300 text-green-700 hover:bg-green-50"
-                          onClick={() => {
-                            const text = `🍽️ Mira mi perfil gastronómico en Picada.app\n${publicProfileUrl}`
-                            window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank')
-                          }}
-                        >
-                          <MessageCircle className="size-3.5 text-green-500" />
-                          WhatsApp
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="gap-1.5 rounded-xl"
-                          onClick={async () => {
-                            try {
-                              if (navigator.share) {
-                                await navigator.share({ title: `@${username} en Picada.app`, text: `Mira mi mapa gastronómico 🗺️`, url: publicProfileUrl })
-                              } else {
+                    {/* PROGRESO */}
+                    <p className="px-4 pt-5 pb-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Progreso</p>
+                    <div className="mx-3 overflow-hidden rounded-2xl border divide-y bg-card">
+                      <button onClick={() => setSettingsSubView('progreso')} className="flex items-center gap-3 w-full px-4 py-3.5 text-left hover:bg-muted/30 active:bg-muted/50 transition-colors">
+                        <div className="size-8 rounded-lg bg-amber-500 flex items-center justify-center shrink-0">
+                          <Zap className="size-4 text-white" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium">XP y nivel</p>
+                          <p className="text-xs text-muted-foreground">{nivel.nombre} {nivel.emoji} · {puntos} XP</p>
+                        </div>
+                        <ChevronRight className="size-4 text-muted-foreground shrink-0" />
+                      </button>
+                      <button onClick={() => setSettingsSubView('logros')} className="flex items-center gap-3 w-full px-4 py-3.5 text-left hover:bg-muted/30 active:bg-muted/50 transition-colors">
+                        <div className="size-8 rounded-lg bg-violet-500 flex items-center justify-center shrink-0">
+                          <Trophy className="size-4 text-white" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium">Logros</p>
+                          <p className="text-xs text-muted-foreground">Ver logros desbloqueados</p>
+                        </div>
+                        <ChevronRight className="size-4 text-muted-foreground shrink-0" />
+                      </button>
+                      <button onClick={() => setSettingsSubView('desafios')} className="flex items-center gap-3 w-full px-4 py-3.5 text-left hover:bg-muted/30 active:bg-muted/50 transition-colors">
+                        <div className="size-8 rounded-lg bg-rose-500 flex items-center justify-center shrink-0">
+                          <Flame className="size-4 text-white" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium">Desafíos</p>
+                          <p className="text-xs text-muted-foreground">{challenges.filter(d => d.completed).length}/{challenges.length} completados hoy</p>
+                        </div>
+                        <ChevronRight className="size-4 text-muted-foreground shrink-0" />
+                      </button>
+                      <button onClick={() => setSettingsSubView('leaderboard')} className="flex items-center gap-3 w-full px-4 py-3.5 text-left hover:bg-muted/30 active:bg-muted/50 transition-colors">
+                        <div className="size-8 rounded-lg bg-sky-500 flex items-center justify-center shrink-0">
+                          <TrendingUp className="size-4 text-white" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium">Leaderboard</p>
+                          <p className="text-xs text-muted-foreground">Top local</p>
+                        </div>
+                        <ChevronRight className="size-4 text-muted-foreground shrink-0" />
+                      </button>
+                    </div>
+
+                    {/* COMUNIDAD */}
+                    <p className="px-4 pt-5 pb-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Comunidad</p>
+                    <div className="mx-3 overflow-hidden rounded-2xl border divide-y bg-card">
+                      <button onClick={() => setSettingsSubView('impacto')} className="flex items-center gap-3 w-full px-4 py-3.5 text-left hover:bg-muted/30 active:bg-muted/50 transition-colors">
+                        <div className="size-8 rounded-lg bg-emerald-500 flex items-center justify-center shrink-0">
+                          <Globe className="size-4 text-white" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium">Mi Impacto</p>
+                          <p className="text-xs text-muted-foreground">Estadísticas de contribución</p>
+                        </div>
+                        <ChevronRight className="size-4 text-muted-foreground shrink-0" />
+                      </button>
+                      <button onClick={() => setSettingsSubView('historial')} className="flex items-center gap-3 w-full px-4 py-3.5 text-left hover:bg-muted/30 active:bg-muted/50 transition-colors">
+                        <div className="size-8 rounded-lg bg-indigo-500 flex items-center justify-center shrink-0">
+                          <MapPin className="size-4 text-white" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium">Historial de visitas</p>
+                          <p className="text-xs text-muted-foreground">Lugares que has visitado</p>
+                        </div>
+                        <ChevronRight className="size-4 text-muted-foreground shrink-0" />
+                      </button>
+                    </div>
+
+                  </div>
+                )}
+
+                {/* ── SUB-VIEWS ── */}
+                {settingsSubView !== null && (
+                  <div className="p-4 space-y-4">
+
+                    {/* Perfil público */}
+                    {settingsSubView === 'perfil' && (
+                      <Card>
+                        <CardContent className="py-4 space-y-3">
+                          <div className="space-y-1.5">
+                            <p className="text-xs text-muted-foreground">Usuario público</p>
+                            <Input value={username} onChange={e => setUsername(e.target.value)} placeholder="usuario" />
+                          </div>
+                          <div className="space-y-1.5">
+                            <p className="text-xs text-muted-foreground">Bio</p>
+                            <Textarea value={bio} onChange={e => setBio(e.target.value)} placeholder="Cuéntale a otros qué te gusta comer..." />
+                          </div>
+                          <div className="space-y-1.5">
+                            <p className="text-xs text-muted-foreground">Foto de perfil</p>
+                            <Input type="file" accept="image/*" onChange={e => {
+                              const file = e.target.files?.[0]
+                              if (!file) return
+                              const reader = new FileReader()
+                              reader.onload = () => { if (typeof reader.result === 'string') setAvatarDataUrl(reader.result) }
+                              reader.readAsDataURL(file)
+                            }} />
+                          </div>
+                          <div className="grid grid-cols-1 gap-2">
+                            <div className="relative">
+                              <Instagram className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                              <Input value={instagramUrl} onChange={e => setInstagramUrl(e.target.value)} placeholder="Instagram URL" className="pl-9" />
+                            </div>
+                            <div className="relative">
+                              <Music2 className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                              <Input value={tiktokUrl} onChange={e => setTiktokUrl(e.target.value)} placeholder="TikTok URL" className="pl-9" />
+                            </div>
+                            <div className="relative">
+                              <Link2 className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                              <Input value={websiteUrl} onChange={e => setWebsiteUrl(e.target.value)} placeholder="Sitio web / Linktree" className="pl-9" />
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between rounded-lg border px-3 py-2">
+                            <div className="text-xs">
+                              <p className="font-semibold">Perfil público</p>
+                              <p className="text-muted-foreground">Otros pueden ver tus reseñas y favoritos</p>
+                            </div>
+                            <Switch checked={isPublic} onCheckedChange={setIsPublic} />
+                          </div>
+                          <Button className="w-full gap-2 rounded-xl" onClick={() => {
+                            saveProfileSocialSettings({ username, bio, avatarDataUrl, instagramUrl, tiktokUrl, websiteUrl, isPublic, reviews: reviewsText.split('\n').map(s => s.trim()).filter(Boolean), visitedPlaces: visitedText.split('\n').map(s => s.trim()).filter(Boolean), socialPosts })
+                            setSaved(true)
+                            window.setTimeout(() => setSaved(false), 1600)
+                          }}>
+                            <Globe className="size-4" />
+                            {saved ? 'Guardado ✓' : 'Guardar perfil'}
+                          </Button>
+                          {isPublic && (
+                            <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="rounded-xl border-2 border-dashed border-orange-300 dark:border-orange-700 bg-orange-50/50 dark:bg-orange-950/10 p-4 space-y-3">
+                              <div className="text-center">
+                                <p className="text-sm font-bold">¡Tu perfil es público!</p>
+                                <p className="text-xs text-muted-foreground mt-0.5">Compártelo con amigos</p>
+                              </div>
+                              <div className="grid grid-cols-2 gap-2">
+                                <Button variant="outline" size="sm" className="gap-1.5 rounded-xl border-green-300 text-green-700 hover:bg-green-50" onClick={() => {
+                                  const text = `🍽️ Mira mi perfil gastronómico en Picada.app\n${publicProfileUrl}`
+                                  window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank')
+                                }}>
+                                  <MessageCircle className="size-3.5 text-green-500" />
+                                  WhatsApp
+                                </Button>
+                                <Button variant="outline" size="sm" className="gap-1.5 rounded-xl" onClick={async () => {
+                                  try {
+                                    if (navigator.share) {
+                                      await navigator.share({ title: `@${username} en Picada.app`, text: `Mira mi mapa gastronómico 🗺️`, url: publicProfileUrl })
+                                    } else {
+                                      await navigator.clipboard.writeText(publicProfileUrl)
+                                      setSaved(true)
+                                      window.setTimeout(() => setSaved(false), 1600)
+                                    }
+                                    window.dispatchEvent(new CustomEvent('picada:profile-shared'))
+                                  } catch { /* cancelled */ }
+                                }}>
+                                  <Share2 className="size-3.5" />
+                                  Compartir
+                                </Button>
+                              </div>
+                              <Button variant="ghost" size="sm" className="w-full text-xs text-muted-foreground gap-1.5" onClick={async () => {
                                 await navigator.clipboard.writeText(publicProfileUrl)
                                 setSaved(true)
                                 window.setTimeout(() => setSaved(false), 1600)
-                              }
-                              window.dispatchEvent(new CustomEvent('picada:profile-shared'))
-                            } catch { /* cancelled */ }
-                          }}
-                        >
-                          <Share2 className="size-3.5" />
-                          Compartir
-                        </Button>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="w-full text-xs text-muted-foreground gap-1.5"
-                        onClick={async () => {
-                          await navigator.clipboard.writeText(publicProfileUrl)
-                          setSaved(true)
-                          window.setTimeout(() => setSaved(false), 1600)
-                        }}
-                      >
-                        <Copy className="size-3" />
-                        Copiar link del perfil
-                      </Button>
-                    </motion.div>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
+                              }}>
+                                <Copy className="size-3" />
+                                Copiar link del perfil
+                              </Button>
+                            </motion.div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    )}
 
-            {/* Niveles */}
-            <Separator />
-            <div>
-              <h2 className="font-bold text-base mb-3">Tus niveles</h2>
-              <div className="space-y-2">
-                {(['Explorador', 'Crítico', 'Inspector', 'Rey Picada'] as const).map(nombre => {
-                  const n = { 'Explorador': { emoji: '🧭', min: 0, color: 'text-sky-600' }, 'Crítico': { emoji: '🍽️', min: 400, color: 'text-violet-600' }, 'Inspector': { emoji: '🔍', min: 1500, color: 'text-amber-600' }, 'Rey Picada': { emoji: '👑', min: 5000, color: 'text-rose-600' } }[nombre]!
-                  const unlocked = puntos >= n.min
-                  return (
-                    <div key={nombre} className={`flex items-center gap-3 p-3 rounded-xl border ${unlocked ? 'bg-muted/50' : 'opacity-40'}`}>
-                      <span className="text-2xl">{n.emoji}</span>
-                      <div className="flex-1">
-                        <p className={`text-sm font-bold ${unlocked ? n.color : 'text-muted-foreground'}`}>{nombre}</p>
-                        <p className="text-xs text-muted-foreground">Desde {n.min} XP</p>
+                    {/* Cuenta */}
+                    {settingsSubView === 'cuenta' && (
+                      <Card>
+                        <CardContent className="py-4">
+                          <AuthQuickRegister />
+                        </CardContent>
+                      </Card>
+                    )}
+
+                    {/* Gustos y filtros */}
+                    {settingsSubView === 'gustos' && (
+                      <Card>
+                        <CardHeader className="pb-2">
+                          <CardTitle className="text-sm">Personalización del feed</CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-3">
+                          <TagAutocompleteInput label="Gustos gastronómicos" values={likes} suggestions={FOOD_LIKES_CATALOG} onChange={setLikes} />
+                          <TagAutocompleteInput label="Restricciones alimenticias" values={restrictions} suggestions={DIETARY_RESTRICTIONS_CATALOG} onChange={setRestrictions} />
+                          <TagAutocompleteInput label="No me gusta" values={dislikes} suggestions={FOOD_DISLIKES_CATALOG} onChange={setDislikes} />
+                          <div className="space-y-1.5">
+                            <p className="text-xs text-muted-foreground">Religión (opcional)</p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {RELIGION_CATALOG.map(r => (
+                                <Badge key={r} variant={religion === r ? 'default' : 'outline'} className="cursor-pointer" onClick={() => {
+                                  setReligion(r)
+                                  const adds = RELIGION_RESTRICTIONS[r] || []
+                                  setRestrictions(prev => [...new Set([...prev, ...adds])])
+                                }}>
+                                  {r}
+                                </Badge>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            <Badge variant="outline" className="text-xs">Gustos: {prefStats.likes}</Badge>
+                            <Badge variant="outline" className="text-xs">Restricciones: {prefStats.restrictions}</Badge>
+                            <Badge variant="outline" className="text-xs">No me gusta: {prefStats.dislikes}</Badge>
+                          </div>
+                          <Button className="w-full" onClick={() => {
+                            savePreferences({ likes, restrictions, dislikes, religion })
+                            setSaved(true)
+                            window.setTimeout(() => setSaved(false), 1600)
+                          }}>
+                            {saved ? 'Guardado ✓' : 'Guardar preferencias'}
+                          </Button>
+                        </CardContent>
+                      </Card>
+                    )}
+
+                    {/* Ubicación */}
+                    {settingsSubView === 'ubicacion' && (
+                      <Card>
+                        <CardContent className="py-4 space-y-3">
+                          <div className="flex items-center justify-between rounded-lg border px-3 py-2">
+                            <div className="text-xs">
+                              <p className="font-semibold">Usar mi ubicación actual</p>
+                              <p className="text-muted-foreground">Personaliza reels, mapa y publicaciones</p>
+                            </div>
+                            <Switch checked={locationMode === 'auto'} onCheckedChange={checked => onLocationModeChange(checked ? 'auto' : 'manual')} />
+                          </div>
+                          <LocationAutocomplete value={locationQuery} onChange={onLocationChange} />
+                          <Button variant="outline" className="w-full" onClick={onUseCurrentLocation}>
+                            Actualizar con mi ubicación ahora
+                          </Button>
+                        </CardContent>
+                      </Card>
+                    )}
+
+                    {/* Favoritos */}
+                    {settingsSubView === 'favoritos' && (
+                      <Card>
+                        <CardContent className="py-4 space-y-3">
+                          {favoriteItems.length === 0 ? (
+                            <p className="text-xs text-muted-foreground">Marca favoritos en Reels y aparecerán aquí.</p>
+                          ) : (
+                            favoriteItems.slice(0, 8).map(item => (
+                              <div key={item.id} className="flex items-center justify-between gap-2 border-b last:border-b-0 pb-2 last:pb-0">
+                                <div className="min-w-0">
+                                  <p className="text-sm font-semibold truncate">{item.title}</p>
+                                  <p className="text-xs text-muted-foreground truncate">{item.author}</p>
+                                </div>
+                                <Button size="sm" variant="outline" asChild>
+                                  <a href={item.sourceUrl} target="_blank" rel="noreferrer">Ver</a>
+                                </Button>
+                              </div>
+                            ))
+                          )}
+                          <Button variant="secondary" className="w-full gap-2" onClick={async () => {
+                            const text = favoriteItems.map(f => `- ${f.title} (${f.sourceUrl})`).join('\n') || 'Sin favoritos'
+                            await navigator.clipboard.writeText(text)
+                          }}>
+                            <Copy className="size-4" />
+                            Copiar lista de favoritos
+                          </Button>
+                        </CardContent>
+                      </Card>
+                    )}
+
+                    {/* XP y nivel */}
+                    {settingsSubView === 'progreso' && (
+                      <div className="space-y-4">
+                        <Card className="border-orange-100/80 bg-gradient-to-br from-orange-50/40 to-transparent">
+                          <CardContent className="space-y-2 py-4">
+                            <div className="flex items-center justify-between text-xs text-muted-foreground">
+                              <span className="flex items-center gap-1 font-medium text-foreground">
+                                <Zap className="size-3.5 text-orange-500" />
+                                Progreso de nivel
+                              </span>
+                              {siguiente ? <span>{siguiente.nombre} {siguiente.emoji} en {siguiente.min - puntos} XP</span> : null}
+                            </div>
+                            <Progress value={progreso} className="h-2.5" />
+                            <LevelProgressHint points={puntos} />
+                          </CardContent>
+                        </Card>
+                        <div className="grid grid-cols-4 gap-2">
+                          {[
+                            { icon: MessageCircle, label: 'Reseñas', value: String(socialPosts.filter(p => p.type === 'review').length + reviewsText.split('\n').filter(Boolean).length), highlight: true },
+                            { icon: Star, label: 'Likes', value: String(likesCount) },
+                            { icon: Camera, label: 'Favoritos', value: String(favoritesCount) },
+                            { icon: Flame, label: 'Pendientes', value: String(pendingDishes) },
+                          ].map(({ icon: Icon, label, value, highlight }) => (
+                            <Card key={label} className={highlight ? 'border-orange-200 dark:border-orange-800' : ''}>
+                              <CardContent className="flex flex-col items-center gap-1 px-1 py-3">
+                                <Icon className={`size-4 ${highlight ? 'text-orange-500' : 'text-muted-foreground'}`} />
+                                <p className={`text-base font-extrabold leading-none ${highlight ? 'text-orange-600 dark:text-orange-400' : ''}`}>{value}</p>
+                                <p className="text-[9px] text-muted-foreground text-center leading-tight">{label}</p>
+                              </CardContent>
+                            </Card>
+                          ))}
+                        </div>
+                        <StreakBanner current={streak.current} longest={streak.longest} />
+                        <div className="space-y-2">
+                          {(['Explorador', 'Crítico', 'Inspector', 'Rey Picada'] as const).map(nombre => {
+                            const n = { 'Explorador': { emoji: '🧭', min: 0, color: 'text-sky-600' }, 'Crítico': { emoji: '🍽️', min: 400, color: 'text-violet-600' }, 'Inspector': { emoji: '🔍', min: 1500, color: 'text-amber-600' }, 'Rey Picada': { emoji: '👑', min: 5000, color: 'text-rose-600' } }[nombre]!
+                            const unlocked = puntos >= n.min
+                            return (
+                              <div key={nombre} className={`flex items-center gap-3 p-3 rounded-xl border ${unlocked ? 'bg-muted/50' : 'opacity-40'}`}>
+                                <span className="text-2xl">{n.emoji}</span>
+                                <div className="flex-1">
+                                  <p className={`text-sm font-bold ${unlocked ? n.color : 'text-muted-foreground'}`}>{nombre}</p>
+                                  <p className="text-xs text-muted-foreground">Desde {n.min} XP</p>
+                                </div>
+                                {unlocked && <Badge className="text-xs bg-green-600 hover:bg-green-600">Activo</Badge>}
+                              </div>
+                            )
+                          })}
+                        </div>
                       </div>
-                      {unlocked && <Badge className="text-xs bg-green-600 hover:bg-green-600">Activo</Badge>}
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
+                    )}
+
+                    {/* Logros */}
+                    {settingsSubView === 'logros' && <DynamicAchievementsSection />}
+
+                    {/* Desafíos */}
+                    {settingsSubView === 'desafios' && (
+                      <div className="space-y-3">
+                        <AnimatePresence>
+                          {challenges.map(c => (
+                            <motion.div key={c.id} layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+                              <ChallengeCard challenge={c} onComplete={handleChallengeAction} />
+                            </motion.div>
+                          ))}
+                        </AnimatePresence>
+                      </div>
+                    )}
+
+                    {/* Leaderboard */}
+                    {settingsSubView === 'leaderboard' && <LeaderboardPanel locationQuery={locationQuery} />}
+
+                    {/* Mi Impacto */}
+                    {settingsSubView === 'impacto' && (
+                      <CreatorDashboard
+                        locationQuery={locationQuery}
+                        influencePoints={influencePoints}
+                        recommendationsClicks={recommendationClicks}
+                        inspectorLevel={nivel.nombre}
+                        topDiscovery={socialPosts[0]?.place || favoriteItems[0]?.title}
+                      />
+                    )}
+
+                    {/* Historial */}
+                    {settingsSubView === 'historial' && <VisitedHistory />}
+
+                  </div>
+                )}
+
               </div>
             </ScrollArea>
           </SheetContent>

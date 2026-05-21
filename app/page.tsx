@@ -36,6 +36,7 @@ import { AdvancedSearchModal } from '@/components/search/advanced-search-modal'
 import { getSupabaseBrowserClient } from '@/lib/supabase'
 import { ensureProfileForSession } from '@/lib/auth/sync-profile'
 import { syncCollectionsFromSupabase } from '@/lib/social/collections'
+import { syncBadgesFromSupabase } from '@/lib/gamification/core'
 import { AuthQuickRegister } from '@/components/auth/auth-quick-register'
 import { CollectionPickerSheet } from '@/components/restaurant/collection-picker-sheet'
 import { AchievementToast } from '@/components/gamification/AchievementToast'
@@ -169,6 +170,7 @@ export default function Home() {
       if (session) {
         void ensureProfileForSession(session)
         void syncCollectionsFromSupabase()
+        void syncBadgesFromSupabase()
       }
     })
     return () => sub.subscription.unsubscribe()
@@ -488,6 +490,7 @@ export default function Home() {
               onSectionChange={setProfileSection}
               profileTabActive={tab === 'profile'}
               onSelectPlace={handleSelect}
+              isAuthed={isAuthed}
             />
           </View>
         </ErrorBoundary>
