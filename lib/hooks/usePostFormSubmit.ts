@@ -16,6 +16,17 @@ type SubmitInput = {
   moods: string[]
   mediaUrl: string | null
   mediaKind: 'photo' | 'video' | null
+  picadaLat?: number | null
+  picadaLng?: number | null
+  picadaAddress?: string | null
+  picadaCommune?: string | null
+  picadaCity?: string | null
+  picadaRegion?: string | null
+  picadaName?: string
+  picadaCategory?: string
+  picadaPhone?: string
+  picadaInstagram?: string
+  picadaGalleryUrl?: string | null
 }
 
 export function usePostFormSubmit() {
@@ -55,6 +66,51 @@ export function usePostFormSubmit() {
       throw new Error('Inicia sesión para publicar.')
     }
 
+    // ── Nueva Picada: insertar lugar pendiente ──────────────────────────
+    if (input.type === 'new-picada') {
+      if (!input.picadaName?.trim() || !input.picadaCategory || input.picadaLat == null || input.picadaLng == null) {
+        setSubmitError('Completa el nombre y categoría del local.')
+        throw new Error('Datos incompletos.')
+      }
+      setIsSubmitting(true)
+      try {
+        const res = await fetch('/api/places/submit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeaders },
+          body: JSON.stringify({
+            name:      input.picadaName.trim(),
+            category:  input.picadaCategory,
+            lat:       input.picadaLat,
+            lng:       input.picadaLng,
+            address:   input.picadaAddress || '',
+            commune:   input.picadaCommune || undefined,
+            city:      input.picadaCity || undefined,
+            region:    input.picadaRegion || undefined,
+            phone:     input.picadaPhone || undefined,
+            instagram: input.picadaInstagram || undefined,
+            gallery:   input.picadaGalleryUrl ? [input.picadaGalleryUrl] : undefined,
+            tags:      input.tags,
+          }),
+        })
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({})) as { error?: string }
+          const msg =
+            data?.error === 'unauthorized'   ? 'Inicia sesión para enviar una picada.' :
+            data?.error === 'rate_limited'   ? 'Demasiados intentos. Intenta en un momento.' :
+            data?.error || `Error al enviar (HTTP ${res.status}).`
+          throw new Error(msg)
+        }
+        const data = (await res.json().catch(() => ({}))) as { ok?: boolean; value?: { place_id?: string } }
+        return { ok: true as const, value: { place_id: data?.value?.place_id || null } as Record<string, unknown> }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'No se pudo enviar.'
+        setSubmitError(msg)
+        throw e
+      } finally {
+        setIsSubmitting(false)
+      }
+    }
+
     const identity = getOrCreateIdentity()
     const safeMediaUrl =
       typeof input.mediaUrl === 'string' && input.mediaUrl.trim() && !input.mediaUrl.startsWith('data:')
@@ -74,7 +130,7 @@ export function usePostFormSubmit() {
         comment: input.comment || null,
         rating: normalizedRating || null,
         isIncognito: input.type === 'incognito',
-        markAsPicada: input.type === 'new-picada',
+        markAsPicada: false,
       },
       taxonomy: { category: input.category, tags: input.tags, moods: input.moods },
       meta: {

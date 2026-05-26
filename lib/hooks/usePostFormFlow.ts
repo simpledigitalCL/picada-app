@@ -16,6 +16,17 @@ export type PostFormAccumulator = {
   contentCategory:  string
   contentTags:      string[]
   moods:            string[]
+  // Campos exclusivos del flujo nueva picada
+  picadaLat:        number | null
+  picadaLng:        number | null
+  picadaAddress:    string | null
+  picadaCommune:    string | null
+  picadaCity:       string | null
+  picadaRegion:     string | null
+  picadaName:       string
+  picadaCategory:   string
+  picadaPhone:      string
+  picadaInstagram:  string
 }
 
 const DEFAULT_ACCUMULATOR: PostFormAccumulator = {
@@ -28,6 +39,16 @@ const DEFAULT_ACCUMULATOR: PostFormAccumulator = {
   contentCategory: 'experiencia',
   contentTags:     [],
   moods:           [],
+  picadaLat:       null,
+  picadaLng:       null,
+  picadaAddress:   null,
+  picadaCommune:   null,
+  picadaCity:      null,
+  picadaRegion:    null,
+  picadaName:      '',
+  picadaCategory:  '',
+  picadaPhone:     '',
+  picadaInstagram: '',
 }
 
 /** Tipos que requieren lugar seleccionado antes de avanzar al paso 1 */
@@ -48,16 +69,23 @@ export function usePostFormFlow(type: PostFormType | null) {
     [isMediaFlow, isReviewFlow, type],
   )
 
-  // No se puede avanzar del paso 0 sin seleccionar lugar (para los tipos que lo requieren)
+  // No se puede avanzar sin completar el paso actual
   const canAdvance = useMemo(() => {
+    if (type === 'new-picada') {
+      if (step === 0) return formAccumulator.picadaLat != null && formAccumulator.picadaLng != null
+      if (step === 1) return Boolean(formAccumulator.picadaName.trim()) && Boolean(formAccumulator.picadaCategory)
+      return true
+    }
     if (step !== 0) return true
     if (type === 'media') return Boolean(formAccumulator.selectedPlace)
-    if (type === 'review' || type === 'incognito' || type === 'new-picada') {
-      return Boolean(formAccumulator.selectedPlace)
-    }
+    if (type === 'review' || type === 'incognito') return Boolean(formAccumulator.selectedPlace)
     if (PLACE_REQUIRED_TYPES.includes(type)) return Boolean(formAccumulator.selectedPlace)
     return true
-  }, [formAccumulator.placeCategory, formAccumulator.selectedPlace, step, type])
+  }, [
+    formAccumulator.picadaLat, formAccumulator.picadaLng,
+    formAccumulator.picadaName, formAccumulator.picadaCategory,
+    formAccumulator.selectedPlace, step, type,
+  ])
 
   const nextStep = useCallback(() => {
     if (!canAdvance) return

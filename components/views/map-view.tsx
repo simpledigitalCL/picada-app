@@ -1,7 +1,9 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Star, X, Bookmark, ExternalLink, Search } from 'lucide-react'
+import { Capacitor } from '@capacitor/core'
+import { Geolocation } from '@capacitor/geolocation'
+import { Star, X, Bookmark, ExternalLink, Search, Navigation } from 'lucide-react'
 import Image from 'next/image'
 import { type Restaurant } from '@/lib/places/restaurants'
 import {
@@ -59,10 +61,14 @@ type ExternalPlace = {
 }
 
 export function MapView({ onSelect, active, locationQuery, onLocationChange }: MapViewProps) {
-  const mapRef      = useRef<HTMLDivElement>(null)
-  const leafletRef  = useRef<any>(null)
-  const markersRef  = useRef<any[]>([])
-  const requestSeq = useRef(0)
+  const mapRef            = useRef<HTMLDivElement>(null)
+  const leafletRef        = useRef<any>(null)
+  const markersRef        = useRef<any[]>([])
+  const userMarkerRef     = useRef<any>(null)
+  const userPosRef        = useRef<{ lat: number; lng: number } | null>(null)
+  const hasCenteredRef    = useRef(false)
+  const hasPlacesRef      = useRef(false)
+  const requestSeq        = useRef(0)
   const [selectedExternal, setSelectedExternal] = useState<ExternalPlace | null>(null)
   const [mapReady,  setMapReady]  = useState(false)
   const [externalPlaces, setExternalPlaces] = useState<ExternalPlace[]>([])
@@ -114,11 +120,56 @@ export function MapView({ onSelect, active, locationQuery, onLocationChange }: M
   }, [externalPlaces])
 
   useEffect(() => {
-    if (!navigator.geolocation) return
-    navigator.geolocation.getCurrentPosition((pos) => {
-      setUserPos({ lat: pos.coords.latitude, lng: pos.coords.longitude })
-    })
+    const setPos = (lat: number, lng: number) => {
+      const p = { lat, lng }
+      userPosRef.current = p
+      setUserPos(p)
+    }
+
+    if (Capacitor.isNativePlatform()) {
+      Geolocation.requestPermissions().then((perm) => {
+        if (perm.location !== 'granted' && perm.coarseLocation !== 'granted') return
+        Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 10000 })
+          .then(pos => setPos(pos.coords.latitude, pos.coords.longitude))
+          .catch(() => {})
+      }).catch(() => {})
+    } else {
+      if (!navigator.geolocation) return
+      navigator.geolocation.getCurrentPosition(
+        (pos) => setPos(pos.coords.latitude, pos.coords.longitude),
+        () => {},
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
+      )
+    }
   }, [])
+
+  // Marker de posición del usuario (punto azul) + centrado inicial
+  useEffect(() => {
+    if (!mapReady || !userPos || !leafletRef.current) return
+    const { L, map } = leafletRef.current
+
+    if (userMarkerRef.current) {
+      userMarkerRef.current.setLatLng([userPos.lat, userPos.lng])
+    } else {
+      const icon = L.divIcon({
+        className: '',
+        html: `<div style="
+          width:16px;height:16px;border-radius:50%;
+          background:#3b82f6;border:3px solid white;
+          box-shadow:0 0 0 6px rgba(59,130,246,0.25),0 2px 8px rgba(0,0,0,0.35);
+        "></div>`,
+        iconSize: [16, 16],
+        iconAnchor: [8, 8],
+      })
+      userMarkerRef.current = L.marker([userPos.lat, userPos.lng], { icon, zIndexOffset: 1000 }).addTo(map)
+    }
+
+    // Primera vez que obtenemos posición real: centrar en el usuario a zoom 15
+    if (!hasCenteredRef.current) {
+      hasCenteredRef.current = true
+      map.setView([userPos.lat, userPos.lng], 15, { animate: true })
+    }
+  }, [mapReady, userPos])
 
   const placesForMap = useMemo(
     () => (query.trim() ? rankExplorePlacesByQuery(externalPlaces, query) : externalPlaces),
@@ -252,6 +303,7 @@ export function MapView({ onSelect, active, locationQuery, onLocationChange }: M
     return () => {
       leafletRef.current?.map.remove()
       leafletRef.current = null
+      userMarkerRef.current = null
     }
   }, [])
 
@@ -282,7 +334,9 @@ export function MapView({ onSelect, active, locationQuery, onLocationChange }: M
         })
         .then((data: { items?: ExternalPlace[]; source?: string }) => {
           if (seq !== requestSeq.current) return
-          setExternalPlaces(data.items || [])
+          const items = data.items || []
+          if (items.length > 0) hasPlacesRef.current = true
+          setExternalPlaces(items)
           setExternalSource(data.source || '')
           setDiscoverNotice((data as { diagnostics?: { notice?: string } }).diagnostics?.notice || '')
         })
@@ -392,12 +446,12 @@ export function MapView({ onSelect, active, locationQuery, onLocationChange }: M
         markersRef.current.push(marker)
       })
 
-    {
-      const points: Array<[number, number]> = [
-        ...placesForMap
-          .filter(p => p.lat != null && p.lng != null)
-          .map(p => [p.lat as number, p.lng as number] as [number, number]),
-      ]
+    // Si ya tenemos GPS del usuario, no hacer fitBounds (el usuario está centrado a zoom 15).
+    // Si no hay GPS, hacer fitBounds sobre los locales como fallback.
+    if (!userPosRef.current) {
+      const points: Array<[number, number]> = placesForMap
+        .filter(p => p.lat != null && p.lng != null)
+        .map(p => [p.lat as number, p.lng as number] as [number, number])
       if (points.length === 0) return
       const bounds = L.latLngBounds(points)
       map.fitBounds(bounds, { padding: [30, 30], maxZoom: 14 })
@@ -625,6 +679,19 @@ export function MapView({ onSelect, active, locationQuery, onLocationChange }: M
           </Card>
         </div>
       )}
+      {/* Botón flotante: centrar en mi posición */}
+      {userPos && (
+        <button
+          className="absolute bottom-28 right-3 z-30 w-10 h-10 rounded-full bg-background shadow-lg border border-border flex items-center justify-center active:scale-95 transition-transform"
+          onClick={() => {
+            if (!userPos || !leafletRef.current) return
+            leafletRef.current.map.setView([userPos.lat, userPos.lng], 15, { animate: true })
+          }}
+        >
+          <Navigation className="size-4 text-blue-500" />
+        </button>
+      )}
+
       {selectedExternal ? (
         <CollectionPickerSheet
           open={pickerOpen}

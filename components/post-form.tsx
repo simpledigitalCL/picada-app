@@ -27,6 +27,14 @@ const ReviewDetailsStep = dynamic(
   () => import('@/components/post-form/steps/ReviewDetailsStep').then(m => m.ReviewDetailsStep),
   { ssr: false, loading: () => <div className="h-32 rounded-2xl bg-muted/50 animate-pulse" /> },
 )
+const NewPicadaMapStep = dynamic(
+  () => import('@/components/post-form/steps/NewPicadaMapStep').then(m => m.NewPicadaMapStep),
+  { ssr: false, loading: () => <div className="h-64 rounded-2xl bg-muted/50 animate-pulse" /> },
+)
+const NewPicadaDetailsStep = dynamic(
+  () => import('@/components/post-form/steps/NewPicadaDetailsStep').then(m => m.NewPicadaDetailsStep),
+  { ssr: false, loading: () => <div className="h-32 rounded-2xl bg-muted/50 animate-pulse" /> },
+)
 
 interface Props {
   type: PostFormType | null
@@ -176,23 +184,42 @@ export function PostForm({ type, locationQuery, contextRestaurant, draft, onClos
     try {
       const result = await submitter.submit({
         type: kind,
-        rating:        flow.formAccumulator.rating,
-        comment:       flow.formAccumulator.comment,
-        selectedPlace: selected,
-        category:      flow.formAccumulator.contentCategory,
-        tags:          flow.formAccumulator.contentTags,
-        moods:         flow.formAccumulator.moods,
+        rating:           flow.formAccumulator.rating,
+        comment:          flow.formAccumulator.comment,
+        selectedPlace:    selected,
+        category:         flow.formAccumulator.contentCategory,
+        tags:             flow.formAccumulator.contentTags,
+        moods:            flow.formAccumulator.moods,
         mediaUrl,
-        mediaKind: media.previewKind,
+        mediaKind:        media.previewKind,
+        picadaLat:        flow.formAccumulator.picadaLat,
+        picadaLng:        flow.formAccumulator.picadaLng,
+        picadaAddress:    flow.formAccumulator.picadaAddress,
+        picadaCommune:    flow.formAccumulator.picadaCommune,
+        picadaCity:       flow.formAccumulator.picadaCity,
+        picadaRegion:     flow.formAccumulator.picadaRegion,
+        picadaName:       flow.formAccumulator.picadaName,
+        picadaCategory:   flow.formAccumulator.picadaCategory,
+        picadaPhone:      flow.formAccumulator.picadaPhone,
+        picadaInstagram:  flow.formAccumulator.picadaInstagram,
+        picadaGalleryUrl: media.uploadedUrl || null,
       })
-      if (result?.value?.post_id) postId = result.value.post_id
-      if (result?.value?.quality_score && result.value.quality_score >= 0.7) {
+      const rv = result?.value as { post_id?: string; quality_score?: number } | null
+      if (rv?.post_id) postId = rv.post_id
+      if (rv?.quality_score && rv.quality_score >= 0.7) {
         confetti({ particleCount: 90, spread: 65, origin: { y: 0.72 } })
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'No se pudo publicar.'
       toast({ title: 'Error al publicar', description: message, variant: 'destructive' })
-      return // Error visible en submitter.submitError
+      return
+    }
+
+    if (type === 'new-picada') {
+      confetti({ particleCount: 80, spread: 60, origin: { y: 0.72 } })
+      toast({ title: '¡Picada enviada!', description: 'Será revisada y publicada pronto. ¡Gracias!' })
+      handleClose()
+      return
     }
 
     toast({ title: '¡Publicado!', description: 'Tu aporte se guardó correctamente.' })
@@ -224,6 +251,47 @@ export function PostForm({ type, locationQuery, contextRestaurant, draft, onClos
 
   // ── Step content ──────────────────────────────────────────────────────────
   const renderStep = () => {
+    // ── Nueva Picada flow ─────────────────────────────────────────────────
+    if (type === 'new-picada') {
+      if (flow.step === 0) {
+        return (
+          <NewPicadaMapStep
+            lat={flow.formAccumulator.picadaLat}
+            lng={flow.formAccumulator.picadaLng}
+            address={flow.formAccumulator.picadaAddress}
+            onLocationSet={(lat, lng, address, geo) =>
+              flow.patchAccumulator({
+                picadaLat:     lat,
+                picadaLng:     lng,
+                picadaAddress: address,
+                picadaCommune: geo.commune,
+                picadaCity:    geo.city,
+                picadaRegion:  geo.region,
+              })
+            }
+          />
+        )
+      }
+      return (
+        <NewPicadaDetailsStep
+          name={flow.formAccumulator.picadaName}
+          category={flow.formAccumulator.picadaCategory}
+          phone={flow.formAccumulator.picadaPhone}
+          instagram={flow.formAccumulator.picadaInstagram}
+          onNameChange={v => flow.patchAccumulator({ picadaName: v })}
+          onCategoryChange={v => flow.patchAccumulator({ picadaCategory: v })}
+          onPhoneChange={v => flow.patchAccumulator({ picadaPhone: v })}
+          onInstagramChange={v => flow.patchAccumulator({ picadaInstagram: v })}
+          photoPreview={media.preview}
+          photoUploading={media.uploading}
+          photoError={media.uploadError}
+          fileRef={media.fileRef}
+          onFileChange={media.handleFileChange}
+          onRemovePhoto={() => { media.setPreview(null); media.setUploadedUrl(null) }}
+        />
+      )
+    }
+
     if (flow.step === 0) {
       return (
         <LocationStep
@@ -231,7 +299,7 @@ export function PostForm({ type, locationQuery, contextRestaurant, draft, onClos
           restaurantQuery={flow.formAccumulator.restaurantQuery}
           selectedPlace={flow.formAccumulator.selectedPlace}
           placeStepError={!flow.canAdvance && (
-            type === 'review' || type === 'incognito' || type === 'media' || type === 'new-picada'
+            type === 'review' || type === 'incognito' || type === 'media'
           )}
           onRestaurantQueryChange={v =>
             flow.patchAccumulator({ restaurantQuery: v, selectedPlace: null, localSlug: null, placeCategory: null })
@@ -263,10 +331,10 @@ export function PostForm({ type, locationQuery, contextRestaurant, draft, onClos
       )
     }
 
-    // review / incognito / new-picada
+    // review / incognito
     return (
       <ReviewDetailsStep
-        type={type === 'incognito' ? 'incognito' : type === 'new-picada' ? 'new-picada' : 'review'}
+        type={type === 'incognito' ? 'incognito' : 'review'}
         rating={flow.formAccumulator.rating}
         comment={flow.formAccumulator.comment}
         moods={flow.formAccumulator.moods}
@@ -338,8 +406,8 @@ export function PostForm({ type, locationQuery, contextRestaurant, draft, onClos
             >
               {renderStep()}
 
-              {/* Tags — solo visible en step > 0 */}
-              {flow.step > 0 && (
+              {/* Tags — visible en step > 0, excepto nueva picada */}
+              {flow.step > 0 && type !== 'new-picada' && (
                 <UnifiedTagInput
                   context={type === 'media' ? 'food' : 'venue'}
                   localSlug={flow.formAccumulator.localSlug}
@@ -409,12 +477,14 @@ export function PostForm({ type, locationQuery, contextRestaurant, draft, onClos
               disabled={submitter.isSubmitting || media.uploading || media.compressing}
             >
               {submitter.isSubmitting
-                ? 'Publicando…'
+                ? (type === 'new-picada' ? 'Enviando…' : 'Publicando…')
                 : media.compressing
                   ? `Comprimiendo… ${media.compressProgress}%`
                   : media.uploading
                     ? 'Subiendo archivo…'
-                    : 'Publicar'}
+                    : type === 'new-picada'
+                      ? 'Agregar picada'
+                      : 'Publicar'}
             </Button>
           )}
         </div>
