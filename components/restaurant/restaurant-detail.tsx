@@ -82,8 +82,11 @@ function loadLocalCommunityPosts(placeName: string, fallbackUsername: string): C
       moods?: string[]
       createdAt: string
     }>
+    const normName = (s: string) =>
+      s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim()
+    const target = normName(placeName)
     return socialPosts
-      .filter(sp => placeTextMatchesLocation(sp.place || '', '', placeName))
+      .filter(sp => target && normName(sp.place || '') === target)
       .map(sp => ({
         id: `local-${sp.id}`,
         username,
@@ -420,7 +423,7 @@ export function RestaurantDetail({ restaurant: r, onClose, onAddReview, onAddPho
     const loadSocial = async () => {
       let remote: SocialPost[] = []
       try {
-        const res = await fetch(`/api/social-feed?place=${encodeURIComponent(r.name)}&limit=90`)
+        const res = await fetch(`/api/social-feed?place_ref=${encodeURIComponent(r.id)}&limit=90`)
         if (res.ok) {
           const data = (await res.json()) as { posts: SocialPost[] }
           remote = data.posts || []
@@ -559,7 +562,7 @@ export function RestaurantDetail({ restaurant: r, onClose, onAddReview, onAddPho
         photoUrl: r.imageUrl,
         coverageSparse: r.coverageSparse,
       },
-      review: { rating: stars, comment: 'calificación rápida' },
+      review: { rating: stars, comment: '' },
       taxonomy: { category: 'experiencia', tags: ['quick_rating'], moods: [] },
     })
   }

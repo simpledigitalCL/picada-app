@@ -121,11 +121,20 @@ if (Capacitor.isNativePlatform()) {
 
 The post form (`components/post-form.tsx`) is multi-step:
 1. `usePostFormFlow` manages step state and `formAccumulator`.
-2. On submit → `usePostFormSubmit.submit()` → `POST /api/posts`.
-3. `/api/posts` overrides `body.user.id` with the authenticated user's real Supabase UUID (not the anonymous identity from localStorage).
-4. `persistUnifiedContent()` in `lib/server/content-persistence.ts` inserts into `posts` table and `post_media` table.
-5. Media URL is stored in `posts.nutrition_data.original_payload.media.url` (the JSONB column) — the `/api/social-feed` route reads it from there, not from a dedicated column.
-6. After success, `post-form.tsx` saves the post to `localStorage` (`picada.profile.social.v1.socialPosts`) and dispatches both `picada:review-published` and `picada:post-published` events.
+2. On submit → `usePostFormSubmit.submit()`.
+   - **review / incognito / media** → `POST /api/posts` → `persistUnifiedContent()` in `lib/server/content-persistence.ts` → inserts into `posts` + `post_media`.
+   - **new-picada** → `POST /api/places/submit` → inserts a `pending` place with `provider='user_submission'`. Does NOT create a post.
+3. `/api/posts` overrides `body.user.id` with the authenticated user's real Supabase UUID.
+4. Media URL is stored in `posts.nutrition_data.original_payload.media.url` (JSONB) — `/api/social-feed` reads it from there, not a dedicated column.
+5. After success, `post-form.tsx` saves to `localStorage` (`picada.profile.social.v1.socialPosts`) and dispatches `picada:review-published` + `picada:post-published`.
+
+### Nueva Picada flow
+
+`type='new-picada'` uses two dedicated steps:
+- **Step 0** — `NewPicadaMapStep`: Leaflet map with address search (Nominatim `countrycodes=cl`) + tap-to-pin. `onLocationSet` returns `(lat, lng, address, { commune, city, region })`.
+- **Step 1** — `NewPicadaDetailsStep`: name, category, phone, instagram, optional photo (reuses `useMediaUpload` → `/api/upload`).
+
+On submit → `POST /api/places/submit`. The `external_id` is `user-{userId}-{timestamp}`. `writeDiscoveryCache` in the discover route skips items whose `id` starts with `user-` to prevent re-indexing user submissions as Google places.
 
 ### Cross-component communication (DOM events)
 
@@ -170,9 +179,19 @@ Tag classification pipeline: `lib/tags/venue-classification.ts` → `lib/tags/me
 - Achievement engine (`lib/gamification/achievement-engine.ts`) triggers toasts via `components/gamification/AchievementToast.tsx`.
 - Leaderboard served by `/api/leaderboard`.
 
+### Place rating
+
+`places.internal_rating` and `places.internal_rating_count` are maintained automatically by the Postgres trigger `trg_refresh_place_rating` on the `posts` table. It recalculates the average of non-incognito ratings whenever a post is inserted, updated, or deleted. Never update these columns manually.
+
+The discover API (`discoverFromPreloadedPlaces`) exposes them as `picadaRating` / `picadaReviews` on `DiscoverItem`. The UI shows `picadaRating || rating` (community rating takes priority over Google rating when present).
+
+### Social feed place filtering
+
+`GET /api/social-feed` accepts a `place_ref` parameter (either an internal UUID or a Google external_id like `ChIJ…`). The server resolves the external_id to an internal UUID via a `places` lookup and filters posts by `place_id`. Always use `place_ref` — never filter by place name, as fuzzy name matching causes reviews from similarly-named places to bleed across.
+
 ### AI integrations
 
-- **Dish scanner** (`/api/scanner`): receives base64 image, calls Anthropic Claude Vision, returns dish name, nutrition estimate, and suggested tags.
+- **Dish scanner** (`/api/scanner`): uses `@google/generative-ai` with model `gemini-1.5-flash`. Requires `GEMINI_API_KEY` env var.
 - **Auto-tagging** (`lib/places/auto-tagging.ts`): triggered in background when a new place is registered; runs inference via `lib/inference/tag-processor.ts`.
 
 ## Environment variables
@@ -187,6 +206,7 @@ Copy `.env.example` to `.env` (this project uses `.env`, not `.env.local`):
 | `SUPABASE_SERVICE_ROLE_KEY` | Service role key — never expose to client |
 | `GOOGLE_MAPS_API_KEY` | Google Maps Platform (Places API + Geocoding API) |
 | `ANTHROPIC_API_KEY` | Anthropic Claude API |
+| `GEMINI_API_KEY` | Google Gemini API — used by `/api/scanner` (dish scanning) |
 
 ## Conventions
 
@@ -228,3 +248,7 @@ Apply schema to a Supabase project via the SQL Editor:
 Required PostgreSQL extensions: `pgcrypto`, `pg_trgm`.
 
 Key tables not in schema.sql (created directly in Supabase): `posts`, `post_media`, `profiles`, `user_points`, `follows`, `saved_items`.
+
+The `posts` table does **not** have `place_lat`/`place_lng` columns (dropped — redundant with `place_id → places.lat/lng`).
+
+Discovery results are cached in `place_discovery_cache` with a 14-day TTL for inventory and 26-hour TTL for daily snapshots. If results look stale after a config change (e.g. billing was down), delete the relevant rows from this table to force a fresh fetch.

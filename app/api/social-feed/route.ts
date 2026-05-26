@@ -27,21 +27,51 @@ export async function GET(req: Request) {
   const entry = url.searchParams.get('entry') || ''
   const location = url.searchParams.get('location') || ''
   const placeFilter = (url.searchParams.get('place') || '').trim()
+  const placeIdFilter = (url.searchParams.get('place_id') || '').trim()
+  const placeRef    = (url.searchParams.get('place_ref') || '').trim()
   const userIdFilter = (url.searchParams.get('user_id') || '').trim()
 
   if (!supabase) return NextResponse.json({ posts: [] })
 
-  const fetchCap = Math.min(placeFilter || location ? 180 : offset + limit + 40, 200)
+  // Resolver place_ref → UUID interno (acepta UUID directo o external_id como ChIJ...)
+  let resolvedPlaceId: string | null = null
+  if (placeRef) {
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(placeRef)
+    if (isUuid) {
+      resolvedPlaceId = placeRef
+    } else {
+      const { data: row } = await supabase
+        .from('places')
+        .select('id')
+        .eq('external_id', placeRef)
+        .maybeSingle()
+      resolvedPlaceId = (row as { id?: string } | null)?.id ?? null
+    }
+    // Si se pidió filtrar por lugar pero no se pudo resolver, devolver vacío.
+    // Sin esto, el query corre sin filtro y retorna todos los posts de la plataforma.
+    if (!resolvedPlaceId) {
+      return NextResponse.json({ posts: [] })
+    }
+  }
+
+  const hasPlaceFilter = Boolean(resolvedPlaceId || placeIdFilter || placeFilter || location)
+  const fetchCap = Math.min(hasPlaceFilter ? 180 : offset + limit + 40, 200)
 
   let query = supabase
     .from('posts')
-    .select('id, user_id, place_name, content, rating, type, mood_tags, is_incognito, nutrition_data, created_at')
+    .select('id, user_id, place_id, place_name, content, rating, type, mood_tags, is_incognito, nutrition_data, created_at')
     .eq('is_incognito', false)
     .order('created_at', { ascending: false })
     .range(0, fetchCap - 1)
 
   if (entry === 'new-picada') {
     query = query.contains('nutrition_data', { entryType: 'new-picada' } as never)
+  }
+
+  if (resolvedPlaceId) {
+    query = query.eq('place_id', resolvedPlaceId)
+  } else if (placeIdFilter) {
+    query = query.eq('place_id', placeIdFilter)
   }
 
   if (userIdFilter) {

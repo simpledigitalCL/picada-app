@@ -26,6 +26,18 @@ import { CollectionPickerSheet } from '@/components/restaurant/collection-picker
 import { isPlaceSaved } from '@/lib/social/collections'
 import { openUnifiedPostForm } from '@/lib/content/post-form-draft'
 
+function zoomToRadiusKm(zoom: number): number {
+  return Math.max(1, Math.min(100, Math.round(200 / Math.pow(2, zoom - 11))))
+}
+
+function haversineM(aLat: number, aLng: number, bLat: number, bLng: number): number {
+  const R = 6371000
+  const dLat = (bLat - aLat) * Math.PI / 180
+  const dLng = (bLng - aLng) * Math.PI / 180
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(aLat * Math.PI / 180) * Math.cos(bLat * Math.PI / 180) * Math.sin(dLng / 2) ** 2
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
 interface MapViewProps {
   onSelect: (r: Restaurant) => void
   active: boolean
@@ -90,6 +102,7 @@ export function MapView({ onSelect, active, locationQuery, onLocationChange }: M
     }
   }, [pickerOpen])
   const [userPos, setUserPos] = useState<{ lat: number; lng: number } | null>(null)
+  const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number; zoom: number } | null>(null)
   const [query, setQuery] = useState('')
   const [searchPlaceholder, setSearchPlaceholder] = useState('')
 
@@ -98,6 +111,12 @@ export function MapView({ onSelect, active, locationQuery, onLocationChange }: M
     const unSub = subscribeToLocationChanges(h)
     return () => unSub()
   }, [])
+
+  // Al cambiar la ubicación de texto, limpiar acumulado para no mezclar zonas distintas
+  useEffect(() => {
+    setExternalPlaces([])
+    setMapCenter(null)
+  }, [locationQuery])
 
   useEffect(() => {
     const load = () => {
@@ -171,10 +190,23 @@ export function MapView({ onSelect, active, locationQuery, onLocationChange }: M
     }
   }, [mapReady, userPos])
 
-  const placesForMap = useMemo(
-    () => (query.trim() ? rankExplorePlacesByQuery(externalPlaces, query) : externalPlaces),
-    [externalPlaces, query],
-  )
+  const placesForMap = useMemo(() => {
+    const base = query.trim() ? rankExplorePlacesByQuery(externalPlaces, query) : [...externalPlaces]
+    return base.sort((a, b) => {
+      // 1. Cercanía al usuario
+      if (userPos && a.lat != null && b.lat != null && a.lng != null && b.lng != null) {
+        const dA = haversineM(userPos.lat, userPos.lng, a.lat, a.lng)
+        const dB = haversineM(userPos.lat, userPos.lng, b.lat, b.lng)
+        if (Math.abs(dA - dB) > 300) return dA - dB
+      }
+      // 2. Afinidad con preferencias
+      if ((b.matchScore || 0) !== (a.matchScore || 0)) return (b.matchScore || 0) - (a.matchScore || 0)
+      // 3. Votos Picada
+      if ((b.picadaReviews || 0) !== (a.picadaReviews || 0)) return (b.picadaReviews || 0) - (a.picadaReviews || 0)
+      // 4. Reseñas Google
+      return (b.reviews || 0) - (a.reviews || 0)
+    })
+  }, [externalPlaces, query, userPos])
 
   const queryCompletions = useMemo(
     () => suggestExploreCompletions(externalPlaces, query, 6),
@@ -298,6 +330,10 @@ export function MapView({ onSelect, active, locationQuery, onLocationChange }: M
       leafletRef.current = { L, map }
       setMapReady(true)
       map.on('click', () => setSelectedExternal(null))
+      map.on('moveend', () => {
+        const c = map.getCenter()
+        setMapCenter({ lat: c.lat, lng: c.lng, zoom: map.getZoom() })
+      })
     })
 
     return () => {
@@ -314,10 +350,13 @@ export function MapView({ onSelect, active, locationQuery, onLocationChange }: M
     const controller = new AbortController()
     const t = window.setTimeout(() => {
       const prefs = loadPreferences()
-      const extra = getDiscoverGeoQueryExtra(location)
+      // Si el mapa tiene centro propio, usarlo; si no, el geo guardado
+      const geoExtra = mapCenter
+        ? `&latitude=${mapCenter.lat}&longitude=${mapCenter.lng}&radius=${zoomToRadiusKm(mapCenter.zoom)}`
+        : getDiscoverGeoQueryExtra(location)
       const seq = ++requestSeq.current
       const discover = async (loc: string) => {
-        const r = await fetch(`/api/restaurants/discover?location=${encodeURIComponent(loc)}&restrictions=${encodeURIComponent(prefs.restrictions.join(','))}${extra}`, { signal: controller.signal })
+        const r = await fetch(`/api/restaurants/discover?location=${encodeURIComponent(loc)}&restrictions=${encodeURIComponent(prefs.restrictions.join(','))}${geoExtra}`, { signal: controller.signal })
         return (r.ok ? r.json() : { items: [] }) as Promise<{ items?: ExternalPlace[]; source?: string; diagnostics?: { notice?: string } }>
       }
       discover(location)
@@ -334,21 +373,24 @@ export function MapView({ onSelect, active, locationQuery, onLocationChange }: M
         })
         .then((data: { items?: ExternalPlace[]; source?: string }) => {
           if (seq !== requestSeq.current) return
-          const items = data.items || []
-          if (items.length > 0) hasPlacesRef.current = true
-          setExternalPlaces(items)
+          const incoming = data.items || []
+          if (incoming.length > 0) hasPlacesRef.current = true
+          // Acumular: agregar lugares nuevos sin borrar los que ya se ven
+          setExternalPlaces(prev => {
+            const map = new Map(prev.map(p => [p.id, p]))
+            for (const p of incoming) map.set(p.id, p)
+            return [...map.values()]
+          })
           setExternalSource(data.source || '')
           setDiscoverNotice((data as { diagnostics?: { notice?: string } }).diagnostics?.notice || '')
         })
-        .catch(() => {
-          // Mantener resultados previos si falla fetch para evitar saltos visuales
-        })
-    }, 220)
+        .catch(() => {})
+    }, 400)
     return () => {
       window.clearTimeout(t)
       controller.abort()
     }
-  }, [active, locationQuery, discoverNonce])
+  }, [active, locationQuery, discoverNonce, mapCenter])
 
   useEffect(() => {
     if (!active || externalPlaces.length === 0 || typeof navigator === 'undefined') return

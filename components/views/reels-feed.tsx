@@ -896,7 +896,7 @@ const PlaceCard = memo(function PlaceCard({
       comuna: locationQuery || 'Zona',
       lat: p.lat || -34.17,
       lng: p.lng || -70.74,
-      rating: p.rating || 4.2,
+      rating: p.picadaRating || p.rating || 0,
       reviewCount: p.reviews || 0,
       distance: 'cerca',
       priceRange: 2,

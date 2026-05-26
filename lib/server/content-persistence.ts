@@ -186,7 +186,7 @@ export async function persistUnifiedContent(supabase: SupabaseClient, body: Unif
   // Resolver place_id: si es UUID lo usamos directo; si es external_id (Google Place ID) lo buscamos
   let placeId = normalizeUuid(body.place?.id) || null
   if (!placeId && body.place?.id) {
-    const externalId = String(body.place.id).trim()
+    const externalId = String(body.place.id).replace(/^ext-/, '').trim()
     const { data: placeRow } = await supabase
       .from('places')
       .select('id')

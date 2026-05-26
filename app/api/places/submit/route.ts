@@ -63,7 +63,7 @@ export async function POST(req: Request) {
       phone,
       website:      instagram ? `https://instagram.com/${instagram.replace(/^@/, '')}` : null,
       gallery,
-      status:       'pending',
+      status:       'active',
       submitted_by: authUser.id,
       raw_payload:  { instagram, tags, submitted_at: new Date().toISOString() },
       last_synced_at: new Date().toISOString(),
@@ -73,6 +73,16 @@ export async function POST(req: Request) {
 
   if (error) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 })
+  }
+
+  // Invalidar snapshot cacheado para que el nuevo lugar aparezca en el próximo discover
+  const locationKey = (commune || city || '').toLowerCase().trim()
+  if (locationKey) {
+    supabase
+      .from('place_discovery_cache')
+      .delete()
+      .ilike('location_key', `%${locationKey}%`)
+      .then(undefined, () => undefined) as Promise<unknown>
   }
 
   return NextResponse.json({ ok: true, value: { place_id: data.id } }, { status: 201 })

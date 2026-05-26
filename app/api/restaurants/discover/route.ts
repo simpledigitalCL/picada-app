@@ -335,7 +335,7 @@ function canUseGoogleForLocation(location: string): boolean {
   return location.trim().length >= 2
 }
 
-async function discoverFromPreloadedPlaces(location: string, key?: string): Promise<DiscoverItem[]> {
+async function discoverFromPreloadedPlaces(location: string, key?: string, providerOnly?: string): Promise<DiscoverItem[]> {
   const supabase = getSupabaseServerClient()
   if (!supabase || !location.trim()) return []
 
@@ -354,12 +354,14 @@ async function discoverFromPreloadedPlaces(location: string, key?: string): Prom
   }
   if (conditions.length === 0) return []
 
-  const { data } = await supabase
+  let dbQuery = supabase
     .from('places')
-    .select('id, provider, external_id, name, address, commune, city, region, maps_url, lat, lng, rating, reviews_count, price_level, gallery, raw_payload, tagging_meta')
+    .select('id, provider, external_id, name, address, commune, city, region, maps_url, lat, lng, rating, internal_rating, internal_rating_count, reviews_count, price_level, gallery, raw_payload, tagging_meta')
     .or(conditions.join(','))
     .order('reviews_count', { ascending: false })
-    .limit(50)
+    .limit(200)
+  if (providerOnly) dbQuery = dbQuery.eq('provider', providerOnly)
+  const { data } = await dbQuery
 
   return (data || []).map((p: any) => {
     const taggingMeta = (p.tagging_meta && typeof p.tagging_meta === 'object') ? p.tagging_meta as PlaceTaggingMeta : undefined
@@ -394,6 +396,8 @@ async function discoverFromPreloadedPlaces(location: string, key?: string): Prom
       lng: Number.isFinite(Number(p.lng)) ? Number(p.lng) : null,
       rating: Number(p.rating || 0),
       reviews: Number(p.reviews_count || 0),
+      picadaRating: p.internal_rating_count >= 1 ? Number(p.internal_rating) : null,
+      picadaReviews: Number(p.internal_rating_count || 0),
       priceLevel: p.price_level ?? null,
       mapsUrl: p.maps_url || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${p.name || ''} ${p.address || ''}`.trim())}`,
       provider: (p.provider === 'openstreetmap' || p.provider === 'osm' ? 'openstreetmap' : 'google_places') as 'google_places' | 'openstreetmap',
@@ -903,6 +907,9 @@ async function writeDiscoveryCache(
     ? (
         await Promise.all(
           items.map(async item => {
+            // Never re-index user submissions as Google/OSM places
+            if (item.id.startsWith('user-')) return null
+
             const rp = item.raw ? (item.raw as Record<string, unknown>) : null
             const googleTypes = extractGoogleTypesFromRaw(rp)
             const editorial = extractEditorialFromRaw(rp)

@@ -55,7 +55,22 @@
       "Bash(grep -n \"AchievementToast\\\\|SonnerToaster\\\\|</div>$\" /Users/inter-mac-602/Documents/GitHub/picada-app/app/page.tsx)",
       "Bash(grep -n \"AllAchievementsSheet\\\\|</div>$\" /Users/inter-mac-602/Documents/GitHub/picada-app/components/views/profile-feedie-chrome.tsx)",
       "mcp__linear-server__save_comment",
-      "Bash(snap --version)"
+      "Bash(snap --version)",
+      "Bash(npx cap *)",
+      "Bash(cross-env CAP_SERVER_URL=http://10.0.2.2:3002 npx cap sync android)",
+      "Bash(CAP_SERVER_URL=http://10.0.2.2:3002 npx cap sync android)",
+      "Bash(CAPACITOR_ANDROID_STUDIO_PATH=/snap/android-studio/209/bin/studio.sh npx cap *)",
+      "Bash(ip addr *)",
+      "Bash(CAP_SERVER_URL=http://192.168.1.11:3002 npx cap sync android)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(curl -s \"https://maps.googleapis.com/maps/api/place/textsearch/json?query=restaurant+santiago&key=AIzaSyBhu7wDJz6UZd9UK7VoVtQCTp6OFylZGFc\")",
+      "Bash(python3 -m json.tool)",
+      "Bash(curl -s \"https://maps.googleapis.com/maps/api/geocode/json?address=Santiago+Chile&key=AIzaSyBhu7wDJz6UZd9UK7VoVtQCTp6OFylZGFc\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(d.get\\('status'\\), d.get\\('error_message',''\\)\\)\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('STATUS:', d.get\\('status'\\)\\); print\\('ERROR:', d.get\\('error_message','ninguno'\\)\\)\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('STATUS:', d.get\\('status'\\)\\); print\\('RESULTS:', len\\(d.get\\('results',[]\\)\\)\\); print\\('ERROR:', d.get\\('error_message','ninguno'\\)\\)\")"
     ]
   },
   "enableAllProjectMcpServers": true,
