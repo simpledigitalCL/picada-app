@@ -249,7 +249,7 @@ function MyPicadasSection({ onNewPicada }: { onNewPicada?: () => void }) {
       ) : (
         <div className="space-y-2">
           {allMine.slice(0, 5).map(p => (
-            <Card key={p.id} className="overflow-hidden">
+            <Card key={p.id} className="overflow-hidden p-0 gap-0">
               <CardContent className="py-2.5 px-3 flex items-center gap-3">
                 {p.photo ? (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -291,6 +291,16 @@ function placeTagSlugs(place: ExternalPlace): string[] {
   for (const s of place.automatedSeedTags || []) out.add(String(s.slug || '').toLowerCase().trim())
   for (const t of place.inferredTags || []) out.add(String(t || '').toLowerCase().trim())
   return [...out].filter(Boolean)
+}
+
+function cleanAddress(address: string): string {
+  return address
+    .replace(/,?\s*\d{7}/g, '')                                  // código postal chileno
+    .replace(/Región Metropolitana de Santiago/g, 'RM')
+    .replace(/Provincia de Santiago,?\s*/g, '')
+    .replace(/\s*,\s*,/g, ',')
+    .replace(/,\s*$/, '')
+    .trim()
 }
 
 function intentMatchTag(place: ExternalPlace, intent: IntentDef | null): string | null {
@@ -513,8 +523,8 @@ export function HotPicadaView({ locationQuery, onSelect, onLocationChange, onNew
   )
 
   return (
-    <ScrollArea className="h-full">
-      <div className="px-3 sm:px-4 pt-5 pb-24 space-y-4 max-w-md mx-auto w-full">
+    <div className="h-full overflow-y-auto overflow-x-hidden">
+      <div className="px-4 pt-5 pb-24 space-y-4 max-w-md mx-auto">
 
         {/* Header */}
         <div className="flex items-start justify-between gap-2">
@@ -522,10 +532,8 @@ export function HotPicadaView({ locationQuery, onSelect, onLocationChange, onNew
             <h1 className="text-2xl font-extrabold tracking-tight flex items-center gap-2">
               <Image src="/picada-logo.png" alt="Picada" width={122} height={36} className="h-8 w-auto rounded-sm bg-white p-1" />
             </h1>
-            <p className="text-xs text-muted-foreground mt-1">
-              {Object.keys(remoteRankById).length > 0
-                ? 'Ranking comunitario regional en tiempo real · Top 200 para entrar'
-                : 'Ranking comunitario regional · Top 200 para entrar'}
+            <p className="text-xs text-muted-foreground mt-1 leading-snug">
+              Ranking comunitario · Top 200 para entrar
             </p>
             {loading ? <p className="text-[11px] text-orange-600 mt-1">Cargando locales y señales...</p> : null}
             {!loading && discoverNotice ? <p className="text-[11px] text-amber-700 mt-1">{discoverNotice}</p> : null}
@@ -548,7 +556,8 @@ export function HotPicadaView({ locationQuery, onSelect, onLocationChange, onNew
         </div>
 
         <LocationAutocomplete value={locationQuery} onChange={onLocationChange} />
-        <div className="flex gap-1.5 overflow-x-auto scrollbar-none pb-0.5">
+        <div className="w-full overflow-hidden">
+          <div className="flex gap-1.5 overflow-x-auto scrollbar-none pb-0.5">
           {orderedIntents.map(intent => (
             <Button
               key={intent.id}
@@ -564,6 +573,7 @@ export function HotPicadaView({ locationQuery, onSelect, onLocationChange, onNew
               {intent.label}
             </Button>
           ))}
+          </div>
         </div>
         <div className="space-y-1">
           <div className="relative">
@@ -592,24 +602,24 @@ export function HotPicadaView({ locationQuery, onSelect, onLocationChange, onNew
           <button
             type="button"
             onClick={() => setActiveTab('ranking')}
-            className={`flex-1 py-2.5 text-[11px] sm:text-xs font-bold flex items-center justify-center gap-1 transition-colors ${
+            className={`flex-1 py-2 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors ${
               activeTab === 'ranking'
                 ? 'bg-orange-500 text-white'
                 : 'bg-background text-muted-foreground hover:text-foreground'
             }`}
           >
-            <Flame className="size-3.5" /> Ranking comunidad
+            <Flame className="size-3.5 shrink-0" /> Ranking
           </button>
           <button
             type="button"
             onClick={() => setActiveTab('mis-picadas')}
-            className={`flex-1 py-2.5 text-[11px] sm:text-xs font-bold flex items-center justify-center gap-1 transition-colors ${
+            className={`flex-1 py-2 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors ${
               activeTab === 'mis-picadas'
                 ? 'bg-orange-500 text-white'
                 : 'bg-background text-muted-foreground hover:text-foreground'
             }`}
           >
-            <MapPin className="size-3.5" /> Mis picadas
+            <MapPin className="size-3.5 shrink-0" /> Mis picadas
           </button>
         </div>
 
@@ -635,7 +645,7 @@ export function HotPicadaView({ locationQuery, onSelect, onLocationChange, onNew
                 description: filteredTop1.reviewsText?.[0] || filteredTop1.address || 'Top 1 comunidad',
                 address: filteredTop1.address || '', comuna: locationQuery || 'Zona',
                 lat: filteredTop1.lat || -33.45, lng: filteredTop1.lng || -70.66,
-                rating: filteredTop1.rating || 4.2, reviewCount: filteredTop1.reviews || 0,
+                rating: filteredTop1.picadaRating || filteredTop1.rating || 0, reviewCount: filteredTop1.reviews || 0,
                 distance: 'cerca', priceRange: 2, tags: ['Top 1 Comunidad'],
                 imageUrl: filteredTop1.photoUrl || 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=800&q=80',
                 starPlate: { name: 'Destacado del local', kcal: 0, protein: 0, carbs: 0, fat: 0 },
@@ -683,7 +693,7 @@ export function HotPicadaView({ locationQuery, onSelect, onLocationChange, onNew
                 <div className="flex items-end justify-between gap-2">
                   <div className="flex-1 min-w-0">
                     <p className="text-white font-black text-2xl leading-tight truncate drop-shadow-md">{filteredTop1.name}</p>
-                    <p className="text-white/65 text-xs truncate mt-0.5">{filteredTop1.address}</p>
+                    <p className="text-white/65 text-xs truncate mt-0.5">{cleanAddress(filteredTop1.address)}</p>
                   </div>
                   {filteredTop1.rating > 0 && (
                     <div className="shrink-0 bg-black/50 backdrop-blur-sm rounded-xl px-2.5 py-1 text-center">
@@ -695,9 +705,11 @@ export function HotPicadaView({ locationQuery, onSelect, onLocationChange, onNew
                   )}
                 </div>
                 <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-                  {(filteredTop1.reviews || 0) > 0 && (
+                  {((filteredTop1.picadaReviews || 0) > 0 || (filteredTop1.reviews || 0) > 0) && (
                     <span className="text-white/70 text-[10px] bg-white/10 px-2 py-0.5 rounded-full">
-                      {filteredTop1.reviews} reseñas
+                      {(filteredTop1.picadaReviews || 0) > 0
+                        ? `${filteredTop1.picadaReviews} votos comunidad`
+                        : `${filteredTop1.reviews} reseñas`}
                     </span>
                   )}
                   {filteredTop1.openNow != null && (
@@ -735,7 +747,7 @@ export function HotPicadaView({ locationQuery, onSelect, onLocationChange, onNew
                         description: p.reviewsText?.[0] || p.address || 'Top comunidad',
                         address: p.address || '', comuna: locationQuery || 'Zona',
                         lat: p.lat || -33.45, lng: p.lng || -70.66,
-                        rating: p.rating || 4.2, reviewCount: p.reviews || 0,
+                        rating: p.picadaRating || p.rating || 0, reviewCount: p.reviews || 0,
                         distance: 'cerca', priceRange: 2, tags: ['Top Comunidad'],
                         imageUrl: p.photoUrl || 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=800&q=80',
                         starPlate: { name: 'Destacado del local', kcal: 0, protein: 0, carbs: 0, fat: 0 },
@@ -757,13 +769,13 @@ export function HotPicadaView({ locationQuery, onSelect, onLocationChange, onNew
                         {podiumStyle.label}
                       </span>
                       <span className="absolute top-2 right-2 text-lg leading-none">{podiumStyle.icon}</span>
-                      {p.rating > 0 && (
-                        <span className="absolute bottom-2 right-2 text-[9px] font-bold text-yellow-300">★ {p.rating.toFixed(1)}</span>
+                      {(p.picadaRating || p.rating || 0) > 0 && (
+                        <span className="absolute bottom-2 right-2 text-[9px] font-bold text-yellow-300">★ {(p.picadaRating || p.rating || 0).toFixed(1)}</span>
                       )}
                     </div>
                     <div className="px-2.5 py-2">
                       <p className="text-xs font-bold truncate leading-tight">{p.name}</p>
-                      {p.address && <p className="text-[9px] text-muted-foreground truncate mt-0.5">{p.address}</p>}
+                      {p.address && <p className="text-[9px] text-muted-foreground truncate mt-0.5">{cleanAddress(p.address)}</p>}
                     </div>
                   </button>
                 )
@@ -819,7 +831,7 @@ export function HotPicadaView({ locationQuery, onSelect, onLocationChange, onNew
           return (
             <Card
               key={p.id}
-              className={`overflow-hidden cursor-pointer group transition-all ${topStyle}`}
+              className={`overflow-hidden cursor-pointer group transition-all p-0 gap-0 ${topStyle}`}
               onClick={() => {
                 trackTags(placeTagSlugs(p))
                 const pseudo: Restaurant = {
@@ -831,8 +843,8 @@ export function HotPicadaView({ locationQuery, onSelect, onLocationChange, onNew
                   comuna: locationQuery || 'Zona',
                   lat: p.lat || -33.45,
                   lng: p.lng || -70.66,
-                  rating: p.rating || 4.2,
-                  reviewCount: p.reviews || 0,
+                  rating: p.picadaRating || p.rating || 0,
+                  reviewCount: p.picadaReviews || p.reviews || 0,
                   distance: 'cerca',
                   priceRange: 2,
                   tags: ['Tendencia'],
@@ -907,7 +919,7 @@ export function HotPicadaView({ locationQuery, onSelect, onLocationChange, onNew
                         : '🔥 Trending'}
                   </p>
                 ) : null}
-                <p className="text-xs text-muted-foreground line-clamp-1">{p.address}</p>
+                <p className="text-xs text-muted-foreground line-clamp-1">{cleanAddress(p.address)}</p>
                 {p.reviewsText?.[0] && (
                   <p className="text-xs text-muted-foreground line-clamp-2 italic">"{p.reviewsText[0]}"</p>
                 )}
@@ -987,6 +999,6 @@ export function HotPicadaView({ locationQuery, onSelect, onLocationChange, onNew
         </>
         )} {/* end ranking tab */}
       </div>
-    </ScrollArea>
+    </div>
   )
 }
