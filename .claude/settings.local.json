@@ -70,7 +70,8 @@
       "Bash(curl -s \"https://maps.googleapis.com/maps/api/geocode/json?address=Santiago+Chile&key=AIzaSyBhu7wDJz6UZd9UK7VoVtQCTp6OFylZGFc\")",
       "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(d.get\\('status'\\), d.get\\('error_message',''\\)\\)\")",
       "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('STATUS:', d.get\\('status'\\)\\); print\\('ERROR:', d.get\\('error_message','ninguno'\\)\\)\")",
-      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('STATUS:', d.get\\('status'\\)\\); print\\('RESULTS:', len\\(d.get\\('results',[]\\)\\)\\); print\\('ERROR:', d.get\\('error_message','ninguno'\\)\\)\")"
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('STATUS:', d.get\\('status'\\)\\); print\\('RESULTS:', len\\(d.get\\('results',[]\\)\\)\\); print\\('ERROR:', d.get\\('error_message','ninguno'\\)\\)\")",
+      "mcp__supabase__get_logs"
     ]
   },
   "enableAllProjectMcpServers": true,

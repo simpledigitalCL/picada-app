@@ -1104,7 +1104,7 @@ export async function GET(req: Request) {
         items: finalizeDiscoverItems(filterByRadial(scored, hasGeo, latQ, lngQ, radiusKmQ)),
         source: dailySnapshot.source,
         diagnostics: { cacheHit: true, snapshot: 'daily', fastPath: true },
-      })
+      }, { headers: { 'Cache-Control': 'public, s-maxage=900, stale-while-revalidate=3600' } })
     }
   }
 
@@ -1119,30 +1119,46 @@ export async function GET(req: Request) {
   let baseItems = [...inventoryItems, ...freshFromDb]
 
   const googleAllowed = canUseGoogleForLocation(location)
-  // FASE 1 — Enriquecer locales ya en BD con Details API (foto, teléfono, reseñas, WhatsApp, Instagram).
-  // Se hace SIEMPRE antes de decidir si llamar a Google TextSearch.
+  let source: string = preloaded.length > 0 && inventoryItems.length === 0 ? 'preloaded_places' : (cached?.source || 'cache_inventory')
+
+  // Fast return: si Supabase/caché ya tiene resultados, no llamar a Google en este request.
+  // Google se reserva exclusivamente para bootstrap de ubicaciones sin datos previos.
+  if (baseItems.length >= 3) {
+    const withTags = await enrichDiscoverTags(baseItems)
+    const scored = withTags.map(item => {
+      const m = scoreByRestrictions(item, restrictions)
+      return { ...item, matchScore: m.score, matchReason: m.reason }
+    })
+    const withOffers = await attachOffersBatch(scored)
+    const radialFiltered = filterByRadial(withOffers, hasGeo, latQ, lngQ, radiusKmQ)
+    await writeDiscoveryCache(locationDailySnapshotKey, source, radialFiltered, LOCATION_DAILY_CACHE_TTL_MS, { persistPlaces: false })
+    return NextResponse.json({
+      items: finalizeDiscoverItems(radialFiltered),
+      source,
+      diagnostics: { cacheHit: true, snapshot: 'supabase_fast' },
+    }, { headers: { 'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=1800' } })
+  }
+
+  // FASE 1 — Enriquecer locales con Details API solo cuando no hay suficientes datos en BD.
   if (key && detailsRemaining > 0 && baseItems.length > 0) {
-    const enrichResult = await enrichGoogleWithLiteDetails(baseItems, key, Math.min(6, detailsRemaining))
+    const enrichResult = await enrichGoogleWithLiteDetails(baseItems, key, Math.min(3, detailsRemaining))
     if (enrichResult.consumed > 0) {
       baseItems = enrichResult.items
       detailsRemaining = Math.max(0, detailsRemaining - enrichResult.consumed)
       await Promise.all([
         addBudgetCount(globalDailyDetailsBudgetKey(), enrichResult.consumed),
         addBudgetCount(locationDailyDetailsBudgetKey(normalizedLocation), enrichResult.consumed),
-        // Persistir datos enriquecidos (foto, teléfono, reseñas) de vuelta en BD
         writeDiscoveryCache(normalizedLocation, cached?.source || 'cache_inventory', baseItems, LOCATION_CACHE_TTL_MS),
       ])
     }
   }
 
-  // FASE 2 — Descubrir nuevos locales gradualmente todos los días.
-  // Si hay presupuesto, intentar sumar algunos nuevos aunque ya existan resultados en BD.
+  // FASE 2 — Descubrir nuevos locales solo cuando la BD no tiene datos para esta ubicación.
   const needsGoogleDiscovery =
     key &&
     googleAllowed &&
     dailyRemaining > 0
   let newPlacesCount = 0
-  let source: string = preloaded.length > 0 && inventoryItems.length === 0 ? 'preloaded_places' : (cached?.source || 'cache_inventory')
   let googleFailure: string | null = null
 
   if (needsGoogleDiscovery) {
@@ -1160,7 +1176,7 @@ export async function GET(req: Request) {
       const toEnrich = freshCandidates.length > 0
         ? freshCandidates.slice(0, dailyRemaining)
         : googleItems.slice(0, Math.min(DAILY_PER_LOCATION_NEW_LIMIT, googleItems.length))
-      const enrichedNew = await enrichGoogleWithLiteDetails(toEnrich, key, Math.min(6, detailsRemaining))
+      const enrichedNew = await enrichGoogleWithLiteDetails(toEnrich, key, Math.min(3, detailsRemaining))
       const newItems = enrichedNew.items
       newPlacesCount = newItems.length
 

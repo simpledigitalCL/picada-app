@@ -191,6 +191,8 @@ export async function GET(req: Request) {
         : {}),
     }))
 
-  return NextResponse.json({ ok: true, items })
+  return NextResponse.json({ ok: true, items }, {
+    headers: { 'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600' },
+  })
 }
 
