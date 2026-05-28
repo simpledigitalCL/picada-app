@@ -14,12 +14,13 @@ export async function GET() {
     .maybeSingle()
   const qt = Date.now() - t0
   if (error) {
-    return NextResponse.json({ ok: false, reason: 'query_error', code: error.code, message: error.message, qt })
+    const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || 'not_set'
+    return NextResponse.json({ ok: false, reason: 'query_error', code: error.code, message: error.message, qt, url })
   }
   return NextResponse.json({
     ok: true,
     rowFound: Boolean(data),
     qt,
-    supabaseUrl: process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || 'not_set',
+    supabaseUrl: (process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || 'not_set').replace(/eyJ.*/, '[key]'),
   })
 }
