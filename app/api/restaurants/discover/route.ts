@@ -863,19 +863,30 @@ async function readDiscoveryCache(location: string) {
 
 async function readDiscoveryCacheByKey(cacheKey: string) {
   const supabase = getSupabaseServerClient()
-  if (!supabase) { console.log(`[cache] supabase=null key=${cacheKey}`); return null }
+  if (!supabase) {
+    console.log(`DIAG key=${cacheKey} result=null_no_supabase`)
+    return null
+  }
+  const t0 = Date.now()
   const { data, error } = await supabase
     .from('place_discovery_cache')
     .select('payload, source, expires_at')
     .eq('location_key', cacheKey)
     .maybeSingle()
-  if (error) { console.log(`[cache] error=${error.code} ${error.message} key=${cacheKey}`); return null }
-  if (!data) { console.log(`[cache] norow key=${cacheKey}`); return null }
-  const expiresAt = new Date(data.expires_at)
-  if (Number.isNaN(expiresAt.getTime()) || expiresAt.getTime() < Date.now()) {
-    console.log(`[cache] expired key=${cacheKey}`)
+  const qt = Date.now() - t0
+  if (error) {
+    console.log(`DIAG key=${cacheKey} result=error code=${error.code} msg=${error.message} qt=${qt}ms`)
     return null
   }
+  if (!data) {
+    console.log(`DIAG key=${cacheKey} result=norow qt=${qt}ms`)
+    return null
+  }
+  const expiresAt = new Date(data.expires_at)
+  const expired = Number.isNaN(expiresAt.getTime()) || expiresAt.getTime() < Date.now()
+  const isArr = Array.isArray(data.payload)
+  console.log(`DIAG key=${cacheKey} result=${expired ? 'expired' : 'ok'} isArr=${isArr} len=${isArr ? (data.payload as unknown[]).length : 'N/A'} exp=${data.expires_at} qt=${qt}ms`)
+  if (expired) return null
   return data
 }
 
@@ -1078,11 +1089,8 @@ export async function GET(req: Request) {
 
   // Fast path: snapshot diario primero — 1 sola query antes de cualquier otra cosa.
   // Si existe, se devuelve sin leer los 4 contadores de budget.
-  const supabaseOk = Boolean(getSupabaseServerClient())
-  console.log(`[discover] loc=${normalizedLocation} key=${locationDailySnapshotKey} supabase=${supabaseOk}`)
   const dailySnapshot = await readDiscoveryCacheByKey(locationDailySnapshotKey)
   const t1 = Date.now()
-  console.log(`[discover] snapshot=${dailySnapshot ? 'HIT' : 'MISS'} isArr=${Array.isArray(dailySnapshot?.payload)} len=${Array.isArray(dailySnapshot?.payload) ? dailySnapshot!.payload.length : 0} t=${t1-t0}ms`)
   if (dailySnapshot && Array.isArray(dailySnapshot.payload) && dailySnapshot.payload.length > 0) {
     const base = dailySnapshot.payload as DiscoverItem[]
     const withTags = await enrichDiscoverTags(base)
