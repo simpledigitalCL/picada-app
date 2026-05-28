@@ -332,7 +332,18 @@ export function MapView({ onSelect, active, locationQuery, onLocationChange }: M
       map.on('click', () => setSelectedExternal(null))
       map.on('moveend', () => {
         const c = map.getCenter()
-        setMapCenter({ lat: c.lat, lng: c.lng, zoom: map.getZoom() })
+        const zoom = map.getZoom()
+        // Solo actualizar estado si el mapa se movió más de ~5km o cambió el zoom.
+        // Preservar la misma referencia para movimientos menores evita re-runs del useEffect.
+        setMapCenter(prev => {
+          if (
+            prev &&
+            prev.zoom === zoom &&
+            Math.abs(prev.lat - c.lat) < 0.05 &&
+            Math.abs(prev.lng - c.lng) < 0.05
+          ) return prev
+          return { lat: c.lat, lng: c.lng, zoom }
+        })
       })
     })
 

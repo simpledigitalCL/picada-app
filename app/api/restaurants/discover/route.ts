@@ -433,7 +433,7 @@ async function fetchGoogleTextSearchPage(
   return await fetchJsonWithTimeout<GoogleTextSearchResponse>(
     endpoint.toString(),
     { cache: 'no-store' },
-    6500,
+    4000,
   )
 }
 
@@ -444,8 +444,8 @@ async function discoverFromGoogle(location: string, key: string): Promise<Discov
   const first = await fetchGoogleTextSearchPage(key, query)
   const all: GooglePlace[] = [...(first?.results || [])]
   if ((first?.next_page_token || '').trim()) {
-    // Google requiere unos segundos antes de usar next_page_token.
-    await new Promise(r => setTimeout(r, 1700))
+    // Google requiere una pausa antes de usar next_page_token.
+    await new Promise(r => setTimeout(r, 600))
     const second = await fetchGoogleTextSearchPage(key, query, first?.next_page_token)
     all.push(...(second?.results || []))
   }
@@ -546,7 +546,7 @@ async function enrichGoogleWithLiteDetails(
       const json = await fetchJsonWithTimeout<{ result?: GoogleLiteDetails }>(
         endpoint.toString(),
         { cache: 'no-store' },
-        6500,
+        2000,
       )
       if (!json) return
       const d = json.result || {}
@@ -1086,29 +1086,28 @@ export async function GET(req: Request) {
   const locationRemaining = Math.max(0, DAILY_PER_LOCATION_NEW_LIMIT - locationUsed)
   const dailyRemaining = Math.min(globalRemaining, locationRemaining)
 
-  // Fast path: snapshot diario ya materializado
+  // Fast path: snapshot diario ya materializado — se usa siempre si existe.
+  // El snapshot expira naturalmente (26h TTL). El enriquecimiento progresivo con Google
+  // ocurre solo en el primer request tras la expiración, no en cada request del día.
   if (dailySnapshot && Array.isArray(dailySnapshot.payload) && dailySnapshot.payload.length > 0) {
     const base = dailySnapshot.payload as DiscoverItem[]
-    const hasSparseGoogleItems = base.some(i => i.provider === 'google_places' && needsGoogleDetails(i))
-    // Si aún hay presupuesto de "nuevos", no usar fast-path para seguir poblando BD progresivamente.
-    const shouldBypassFastPath =
-      (hasSparseGoogleItems && detailsRemaining > 0) ||
-      (Boolean(key) && canUseGoogleForLocation(location) && dailyRemaining > 0)
-    if (!shouldBypassFastPath) {
-      const withTags = await enrichDiscoverTags(base)
-      const scored = withTags.map(item => {
-        const m = scoreByRestrictions(item, restrictions)
-        return { ...item, matchScore: m.score, matchReason: m.reason }
-      })
-      return NextResponse.json({
-        items: finalizeDiscoverItems(filterByRadial(scored, hasGeo, latQ, lngQ, radiusKmQ)),
-        source: dailySnapshot.source,
-        diagnostics: { cacheHit: true, snapshot: 'daily', fastPath: true },
-      }, { headers: { 'Cache-Control': 'public, s-maxage=900, stale-while-revalidate=3600' } })
-    }
+    const withTags = await enrichDiscoverTags(base)
+    const scored = withTags.map(item => {
+      const m = scoreByRestrictions(item, restrictions)
+      return { ...item, matchScore: m.score, matchReason: m.reason }
+    })
+    return NextResponse.json({
+      items: finalizeDiscoverItems(filterByRadial(scored, hasGeo, latQ, lngQ, radiusKmQ)),
+      source: dailySnapshot.source,
+      diagnostics: { cacheHit: true, snapshot: 'daily', fastPath: true },
+    }, { headers: { 'Cache-Control': 'public, s-maxage=900, stale-while-revalidate=3600' } })
   }
 
-  // Cargar en paralelo: caché de inventario + locales ya guardados en BD + budget de nuevos
+  // Deadline global de 8s para todo el path lento (cubre FASE 1 + FASE 2).
+  // Garantiza que la función nunca exceda el límite de Vercel ni bloquee el browser.
+  const slowPathDeadline = Date.now() + 8000
+
+  // Cargar en paralelo: caché de inventario + locales ya guardados en BD
   const [cached, preloaded] = await Promise.all([
     readDiscoveryCache(normalizedLocation),
     discoverFromPreloadedPlaces(location, key || undefined),
@@ -1121,9 +1120,24 @@ export async function GET(req: Request) {
   const googleAllowed = canUseGoogleForLocation(location)
   let source: string = preloaded.length > 0 && inventoryItems.length === 0 ? 'preloaded_places' : (cached?.source || 'cache_inventory')
 
-  // Fast return: si Supabase/caché ya tiene resultados, no llamar a Google en este request.
-  // Google se reserva exclusivamente para bootstrap de ubicaciones sin datos previos.
-  if (baseItems.length >= 3) {
+  // FASE 1 — Enriquecer locales ya en BD con Details API (foto, teléfono, reseñas).
+  // Solo si aún queda tiempo en el deadline global.
+  if (key && detailsRemaining > 0 && baseItems.length > 0 && Date.now() < slowPathDeadline) {
+    const enrichResult = await enrichGoogleWithLiteDetails(baseItems, key, Math.min(3, detailsRemaining))
+    if (enrichResult.consumed > 0) {
+      baseItems = enrichResult.items
+      detailsRemaining = Math.max(0, detailsRemaining - enrichResult.consumed)
+      await Promise.all([
+        addBudgetCount(globalDailyDetailsBudgetKey(), enrichResult.consumed),
+        addBudgetCount(locationDailyDetailsBudgetKey(normalizedLocation), enrichResult.consumed),
+        writeDiscoveryCache(normalizedLocation, cached?.source || 'cache_inventory', baseItems, LOCATION_CACHE_TTL_MS),
+      ])
+    }
+  }
+
+  // Fast return: si ya hay suficientes items, no llamar a Google TextSearch.
+  // También aplica si se agotó el deadline (retornar lo que hay de Supabase).
+  if (baseItems.length >= 3 || Date.now() >= slowPathDeadline) {
     const withTags = await enrichDiscoverTags(baseItems)
     const scored = withTags.map(item => {
       const m = scoreByRestrictions(item, restrictions)
@@ -1139,25 +1153,12 @@ export async function GET(req: Request) {
     }, { headers: { 'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=1800' } })
   }
 
-  // FASE 1 — Enriquecer locales con Details API solo cuando no hay suficientes datos en BD.
-  if (key && detailsRemaining > 0 && baseItems.length > 0) {
-    const enrichResult = await enrichGoogleWithLiteDetails(baseItems, key, Math.min(3, detailsRemaining))
-    if (enrichResult.consumed > 0) {
-      baseItems = enrichResult.items
-      detailsRemaining = Math.max(0, detailsRemaining - enrichResult.consumed)
-      await Promise.all([
-        addBudgetCount(globalDailyDetailsBudgetKey(), enrichResult.consumed),
-        addBudgetCount(locationDailyDetailsBudgetKey(normalizedLocation), enrichResult.consumed),
-        writeDiscoveryCache(normalizedLocation, cached?.source || 'cache_inventory', baseItems, LOCATION_CACHE_TTL_MS),
-      ])
-    }
-  }
-
-  // FASE 2 — Descubrir nuevos locales solo cuando la BD no tiene datos para esta ubicación.
+  // FASE 2 — Descubrir nuevos locales (solo si no hay datos en BD y queda tiempo).
   const needsGoogleDiscovery =
     key &&
     googleAllowed &&
-    dailyRemaining > 0
+    dailyRemaining > 0 &&
+    Date.now() < slowPathDeadline
   let newPlacesCount = 0
   let googleFailure: string | null = null
 

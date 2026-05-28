@@ -63,7 +63,7 @@ export async function POST(req: Request) {
       phone,
       website:      instagram ? `https://instagram.com/${instagram.replace(/^@/, '')}` : null,
       gallery,
-      status:       'active',
+      status:       'pending',
       submitted_by: authUser.id,
       raw_payload:  { instagram, tags, submitted_at: new Date().toISOString() },
       last_synced_at: new Date().toISOString(),
