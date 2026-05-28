@@ -1067,28 +1067,9 @@ export async function GET(req: Request) {
   const normalizedLocation = normalizeLocationKey(location || `${latQ},${lngQ}`)
   const locationDailySnapshotKey = locationDailyKey(normalizedLocation)
 
-  // Leer todos los contadores de budget en paralelo
-  const [detailsGlobalUsed, detailsLocationUsed, globalUsed, locationUsed, dailySnapshot] = await Promise.all([
-    readBudgetCount(globalDailyDetailsBudgetKey()),
-    readBudgetCount(locationDailyDetailsBudgetKey(normalizedLocation)),
-    readBudgetCount(globalDailyBudgetKey()),
-    readBudgetCount(locationDailyBudgetKey(normalizedLocation)),
-    readDiscoveryCacheByKey(locationDailySnapshotKey),
-  ])
-  let detailsRemaining = Math.max(
-    0,
-    Math.min(
-      DAILY_GLOBAL_DETAILS_LIMIT - detailsGlobalUsed,
-      DAILY_PER_LOCATION_DETAILS_LIMIT - detailsLocationUsed,
-    ),
-  )
-  const globalRemaining = Math.max(0, DAILY_GLOBAL_NEW_LIMIT - globalUsed)
-  const locationRemaining = Math.max(0, DAILY_PER_LOCATION_NEW_LIMIT - locationUsed)
-  const dailyRemaining = Math.min(globalRemaining, locationRemaining)
-
-  // Fast path: snapshot diario ya materializado — se usa siempre si existe.
-  // El snapshot expira naturalmente (26h TTL). El enriquecimiento progresivo con Google
-  // ocurre solo en el primer request tras la expiración, no en cada request del día.
+  // Fast path: snapshot diario primero — 1 sola query antes de cualquier otra cosa.
+  // Si existe, se devuelve sin leer los 4 contadores de budget.
+  const dailySnapshot = await readDiscoveryCacheByKey(locationDailySnapshotKey)
   if (dailySnapshot && Array.isArray(dailySnapshot.payload) && dailySnapshot.payload.length > 0) {
     const base = dailySnapshot.payload as DiscoverItem[]
     const withTags = await enrichDiscoverTags(base)
@@ -1102,6 +1083,24 @@ export async function GET(req: Request) {
       diagnostics: { cacheHit: true, snapshot: 'daily', fastPath: true },
     }, { headers: { 'Cache-Control': 'public, s-maxage=900, stale-while-revalidate=3600' } })
   }
+
+  // Sin snapshot diario: leer contadores de budget para el slow path
+  const [detailsGlobalUsed, detailsLocationUsed, globalUsed, locationUsed] = await Promise.all([
+    readBudgetCount(globalDailyDetailsBudgetKey()),
+    readBudgetCount(locationDailyDetailsBudgetKey(normalizedLocation)),
+    readBudgetCount(globalDailyBudgetKey()),
+    readBudgetCount(locationDailyBudgetKey(normalizedLocation)),
+  ])
+  let detailsRemaining = Math.max(
+    0,
+    Math.min(
+      DAILY_GLOBAL_DETAILS_LIMIT - detailsGlobalUsed,
+      DAILY_PER_LOCATION_DETAILS_LIMIT - detailsLocationUsed,
+    ),
+  )
+  const globalRemaining = Math.max(0, DAILY_GLOBAL_NEW_LIMIT - globalUsed)
+  const locationRemaining = Math.max(0, DAILY_PER_LOCATION_NEW_LIMIT - locationUsed)
+  const dailyRemaining = Math.min(globalRemaining, locationRemaining)
 
   // Deadline global de 8s para todo el path lento (cubre FASE 1 + FASE 2).
   // Garantiza que la función nunca exceda el límite de Vercel ni bloquee el browser.
@@ -1121,17 +1120,32 @@ export async function GET(req: Request) {
   let source: string = preloaded.length > 0 && inventoryItems.length === 0 ? 'preloaded_places' : (cached?.source || 'cache_inventory')
 
   // FASE 1 — Enriquecer locales ya en BD con Details API (foto, teléfono, reseñas).
-  // Solo si aún queda tiempo en el deadline global.
+  // Si hay suficientes items para responder ya, enriquecer en background (no bloquear).
   if (key && detailsRemaining > 0 && baseItems.length > 0 && Date.now() < slowPathDeadline) {
-    const enrichResult = await enrichGoogleWithLiteDetails(baseItems, key, Math.min(3, detailsRemaining))
-    if (enrichResult.consumed > 0) {
-      baseItems = enrichResult.items
-      detailsRemaining = Math.max(0, detailsRemaining - enrichResult.consumed)
-      await Promise.all([
-        addBudgetCount(globalDailyDetailsBudgetKey(), enrichResult.consumed),
-        addBudgetCount(locationDailyDetailsBudgetKey(normalizedLocation), enrichResult.consumed),
-        writeDiscoveryCache(normalizedLocation, cached?.source || 'cache_inventory', baseItems, LOCATION_CACHE_TTL_MS),
-      ])
+    if (baseItems.length >= 3) {
+      enrichGoogleWithLiteDetails(baseItems, key, Math.min(3, detailsRemaining))
+        .then(enrichResult => {
+          if (enrichResult.consumed > 0) {
+            Promise.all([
+              addBudgetCount(globalDailyDetailsBudgetKey(), enrichResult.consumed),
+              addBudgetCount(locationDailyDetailsBudgetKey(normalizedLocation), enrichResult.consumed),
+              writeDiscoveryCache(normalizedLocation, cached?.source || 'cache_inventory', enrichResult.items, LOCATION_CACHE_TTL_MS),
+            ]).then(undefined, () => undefined)
+          }
+        })
+        .then(undefined, () => undefined)
+    } else {
+      // Pocos items: esperar el enriquecimiento antes de decidir si ir a Google.
+      const enrichResult = await enrichGoogleWithLiteDetails(baseItems, key, Math.min(3, detailsRemaining))
+      if (enrichResult.consumed > 0) {
+        baseItems = enrichResult.items
+        detailsRemaining = Math.max(0, detailsRemaining - enrichResult.consumed)
+        Promise.all([
+          addBudgetCount(globalDailyDetailsBudgetKey(), enrichResult.consumed),
+          addBudgetCount(locationDailyDetailsBudgetKey(normalizedLocation), enrichResult.consumed),
+          writeDiscoveryCache(normalizedLocation, cached?.source || 'cache_inventory', baseItems, LOCATION_CACHE_TTL_MS),
+        ]).then(undefined, () => undefined)
+      }
     }
   }
 
@@ -1145,7 +1159,7 @@ export async function GET(req: Request) {
     })
     const withOffers = await attachOffersBatch(scored)
     const radialFiltered = filterByRadial(withOffers, hasGeo, latQ, lngQ, radiusKmQ)
-    await writeDiscoveryCache(locationDailySnapshotKey, source, radialFiltered, LOCATION_DAILY_CACHE_TTL_MS, { persistPlaces: false })
+    writeDiscoveryCache(locationDailySnapshotKey, source, radialFiltered, LOCATION_DAILY_CACHE_TTL_MS, { persistPlaces: false }).then(undefined, () => undefined)
     return NextResponse.json({
       items: finalizeDiscoverItems(radialFiltered),
       source,
@@ -1194,7 +1208,7 @@ export async function GET(req: Request) {
         ])
         // Nuevos locales al frente, existentes detrás
         baseItems = [...newItems, ...baseItems.filter(b => !newItems.find(n => n.id === b.id))]
-        await writeDiscoveryCache(normalizedLocation, 'google_places', baseItems, LOCATION_CACHE_TTL_MS)
+        writeDiscoveryCache(normalizedLocation, 'google_places', baseItems, LOCATION_CACHE_TTL_MS).then(undefined, () => undefined)
         source = 'google_places'
       }
     }
@@ -1219,13 +1233,13 @@ export async function GET(req: Request) {
     })
     const withOffers = await attachOffersBatch(scored)
     const radialFiltered = filterByRadial(withOffers, hasGeo, latQ, lngQ, radiusKmQ)
-    await writeDiscoveryCache(
+    writeDiscoveryCache(
       locationDailySnapshotKey,
       source,
       radialFiltered,
       LOCATION_DAILY_CACHE_TTL_MS,
       { persistPlaces: false },
-    )
+    ).then(undefined, () => undefined)
     return NextResponse.json({
       items: finalizeDiscoverItems(radialFiltered),
       source,
@@ -1241,7 +1255,7 @@ export async function GET(req: Request) {
 
   // Fallback OSM: solo si BD y Google no tienen nada
   const osmItems = await discoverFromOsm(location)
-  await writeDiscoveryCache(normalizedLocation, 'openstreetmap', osmItems as DiscoverItem[], LOCATION_CACHE_TTL_MS)
+  writeDiscoveryCache(normalizedLocation, 'openstreetmap', osmItems as DiscoverItem[], LOCATION_CACHE_TTL_MS).then(undefined, () => undefined)
   const osmEnriched = await enrichDiscoverTags(osmItems as DiscoverItem[])
   const scored = osmEnriched.map(item => {
     const m = scoreByRestrictions(item, restrictions)
@@ -1249,13 +1263,13 @@ export async function GET(req: Request) {
   })
   const withOffers = await attachOffersBatch(scored)
   const radialFiltered = filterByRadial(withOffers, hasGeo, latQ, lngQ, radiusKmQ)
-  await writeDiscoveryCache(
+  writeDiscoveryCache(
     locationDailySnapshotKey,
     'openstreetmap',
     radialFiltered,
     LOCATION_DAILY_CACHE_TTL_MS,
     { persistPlaces: false },
-  )
+  ).then(undefined, () => undefined)
   return NextResponse.json({
     items: finalizeDiscoverItems(radialFiltered),
     source: 'openstreetmap',

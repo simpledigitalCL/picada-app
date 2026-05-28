@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Picada App is a gastronomic discovery mobile/web app for the Chilean market. It's a Next.js 15 (App Router) SPA wrapped in Capacitor for Android/iOS, backed by Supabase (PostgreSQL + Auth + Storage), with Claude AI for dish scanning and Leaflet for interactive maps.
 
-**Estado actual: desarrollo activo, sin ambiente de producción.** No existe dominio de producción ni APK publicado. Todo se prueba localmente o en dispositivo físico apuntando al dev server por IP local.
+**Estado actual: desarrollo activo, desplegado en Vercel (producción en `picada-app.vercel.app`).** No existe APK publicado. El dev server se prueba localmente o en dispositivo físico apuntando al IP local.
 
 ## Commands
 
@@ -164,6 +164,8 @@ Places from Google Maps have IDs like `ChIJba...` (not UUIDs). When working with
 
 OSM places have `external_id` like `osm-nominatim-<id>` — they have no Google photo reference and no `raw_payload.base.photos`. Google places (`ChIJ…`) store photo references in `raw_payload.base.photos[0].photo_reference`; the `gallery` column should contain the full `https://maps.googleapis.com/maps/api/place/photo?…&key=…` URL built from that reference.
 
+The map-view builds pseudo `Restaurant` objects with `id: \`ext-${selectedExternal.id}\`` (prefixing `ext-`). `lib/server/content-persistence.ts` strips this prefix with `.replace(/^ext-/, '')` before querying `places` by `external_id`. Do not store `ext-` prefixed values in the `places.external_id` column — the strip is one-way and will break lookups if the prefix is in the DB.
+
 ### Tag system (core of personalization)
 
 Tags connect users to places via affinity scores. Three layers:
@@ -181,13 +183,33 @@ Tag classification pipeline: `lib/tags/venue-classification.ts` → `lib/tags/me
 
 ### Place rating
 
-`places.internal_rating` and `places.internal_rating_count` are maintained automatically by the Postgres trigger `trg_refresh_place_rating` on the `posts` table. It recalculates the average of non-incognito ratings whenever a post is inserted, updated, or deleted. Never update these columns manually.
+`places.internal_rating` and `places.internal_rating_count` are maintained automatically by the Postgres trigger `trg_refresh_place_rating` on the `posts` table (migration `20260526_refresh_place_rating_trigger.sql`). It recalculates the average of non-incognito `type='review'` posts whenever a post is inserted, updated, or deleted. Never update these columns manually.
 
-The discover API (`discoverFromPreloadedPlaces`) exposes them as `picadaRating` / `picadaReviews` on `DiscoverItem`. The UI shows `picadaRating || rating` (community rating takes priority over Google rating when present).
+`discoverFromPreloadedPlaces` exposes them as `picadaRating` / `picadaReviews` on `DiscoverItem`. The UI shows `picadaRating || rating` (community rating takes priority over Google rating when present).
+
+### Place status and moderation
+
+`places.status` can be `'active'`, `'pending'`, or `'draft'`. The RLS policy `places_active_public_read` grants public SELECT only when `status = 'active' OR auth.uid() = submitted_by`.
+
+User submissions (`POST /api/places/submit`) insert with `status: 'pending'` — they are only visible to the submitting user until manually set to `'active'`. Never change this to `'active'` on insert without a moderation gate. The service-role client in API routes **bypasses RLS**, so always add an explicit `.eq('status', 'active')` filter in server-side queries that shouldn't return pending places.
 
 ### Social feed place filtering
 
-`GET /api/social-feed` accepts a `place_ref` parameter (either an internal UUID or a Google external_id like `ChIJ…`). The server resolves the external_id to an internal UUID via a `places` lookup and filters posts by `place_id`. Always use `place_ref` — never filter by place name, as fuzzy name matching causes reviews from similarly-named places to bleed across.
+`GET /api/social-feed` accepts a `place_ref` parameter (either an internal UUID or a Google external_id like `ChIJ…`). The server resolves the external_id to an internal UUID via a `places` lookup and filters posts by `place_id`. If `place_ref` cannot be resolved, the route returns `{ posts: [] }` rather than returning all posts unfiltered. Always use `place_ref` — never filter by place name, as fuzzy name matching causes reviews from similarly-named places to bleed across.
+
+### Discover API performance architecture
+
+`GET /api/restaurants/discover` has a multi-layer cache designed around a strict performance budget. Understanding the layers is critical before modifying it:
+
+1. **Daily snapshot** (`place_discovery_cache`, 26h TTL, key = `daily:{location}`): the fastest path. When it exists, it is **always** returned immediately — no Google calls, no bypass conditions. The snapshot is rebuilt once after it expires.
+2. **Supabase fast-return**: if the daily snapshot doesn't exist but `discoverFromPreloadedPlaces` returns ≥ 3 items from the `places` table, those are returned immediately after FASE 1 enrichment.
+3. **Google bootstrap** (FASE 1 + FASE 2): runs only when the DB has < 3 items for a location. A hard deadline of **8 seconds** is set at the start of the slow path — if exhausted, whatever Supabase has is returned without waiting for Google.
+
+**Timeouts**: Google Details API calls → 2000ms. Google TextSearch → 4000ms. Pause between TextSearch pages → 600ms. These are intentionally short to respect Vercel's function timeout.
+
+**Do not re-add `shouldBypassFastPath` logic** — it was removed because it caused the daily snapshot to be bypassed on every request when any items had missing phone/photo/reviews, making the fast path effectively dead and causing 45-second loads in production.
+
+**Cache-Control headers**: the daily fast path returns `Cache-Control: public, s-maxage=900, stale-while-revalidate=3600`. The Supabase fast-return returns `s-maxage=300`. These are intentional for Vercel CDN caching — do not remove them.
 
 ### AI integrations
 
@@ -220,9 +242,11 @@ Copy `.env.example` to `.env` (this project uses `.env`, not `.env.local`):
 ## UI patterns
 
 - **Modals/sheets**: always use `side="bottom"` with `h-[92dvh] rounded-t-3xl p-0 flex flex-col overflow-hidden`. Never use `side="right"` for complex content — it creates a narrow sidebar that clips on mobile.
-- **ScrollArea overflow**: Radix UI injects `display: table; min-width: 100%` via inline style on the inner content wrapper, which bypasses CSS `overflow: hidden`. The fix (already applied in `components/ui/scroll-area.tsx`) wraps children in `<div className="w-full">`. Do not remove this wrapper.
+- **ScrollArea overflow**: Radix UI injects `display: table; min-width: 100%` via inline style on the inner content wrapper, which bypasses CSS `overflow: hidden`. The fix (already applied in `components/ui/scroll-area.tsx`) wraps children in `<div className="w-full overflow-x-hidden">`. Do not remove this wrapper.
+- **ScrollArea vs native div**: for full-height scrollable tab views (e.g. `hot-picada-view`), use `<div className="h-full overflow-y-auto overflow-x-hidden">` instead of `ScrollArea` — Radix ScrollArea has layout issues on mobile at the tab level.
 - **shadcn/ui components**: do not manually edit files in `components/ui/` except for established fixes (the ScrollArea wrapper above, the `aria-describedby={undefined}` on Sheet).
 - **`CardContent` padding**: default is `px-6`. In dense layouts (grids, cards inside sheets) override with `px-3` or `px-4` to prevent horizontal overflow on narrow viewports.
+- **Card spacing**: when cards have image content flush to the edge, add `p-0 gap-0` to the `Card` className to remove default shadcn padding.
 
 ## Critical gotchas
 
@@ -251,4 +275,6 @@ Key tables not in schema.sql (created directly in Supabase): `posts`, `post_medi
 
 The `posts` table does **not** have `place_lat`/`place_lng` columns (dropped — redundant with `place_id → places.lat/lng`).
 
-Discovery results are cached in `place_discovery_cache` with a 14-day TTL for inventory and 26-hour TTL for daily snapshots. If results look stale after a config change (e.g. billing was down), delete the relevant rows from this table to force a fresh fetch.
+Discovery results are cached in `place_discovery_cache` with a 14-day TTL for inventory (`location_key = {location}`) and 26-hour TTL for daily snapshots (`location_key = daily:{location}`). If results look stale after a config change (e.g. billing was down), delete the relevant rows from this table to force a fresh fetch.
+
+The `places` table has a `status` column (`active` | `pending` | `draft`). User submissions start as `pending`. The Postgres trigger `trg_refresh_place_rating` on `posts` automatically maintains `internal_rating` and `internal_rating_count` — never update these manually.
