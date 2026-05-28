@@ -863,15 +863,19 @@ async function readDiscoveryCache(location: string) {
 
 async function readDiscoveryCacheByKey(cacheKey: string) {
   const supabase = getSupabaseServerClient()
-  if (!supabase) return null
-  const { data } = await supabase
+  if (!supabase) { console.log(`[cache] supabase=null key=${cacheKey}`); return null }
+  const { data, error } = await supabase
     .from('place_discovery_cache')
     .select('payload, source, expires_at')
     .eq('location_key', cacheKey)
     .maybeSingle()
-  if (!data) return null
+  if (error) { console.log(`[cache] error=${error.code} ${error.message} key=${cacheKey}`); return null }
+  if (!data) { console.log(`[cache] norow key=${cacheKey}`); return null }
   const expiresAt = new Date(data.expires_at)
-  if (Number.isNaN(expiresAt.getTime()) || expiresAt.getTime() < Date.now()) return null
+  if (Number.isNaN(expiresAt.getTime()) || expiresAt.getTime() < Date.now()) {
+    console.log(`[cache] expired key=${cacheKey}`)
+    return null
+  }
   return data
 }
 
