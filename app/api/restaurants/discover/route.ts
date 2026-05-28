@@ -5,6 +5,7 @@ import { buildMergedPlaceClassification } from '@/lib/tags/merge-automated'
 import type { PlaceTaggingMeta } from '@/lib/tags/types'
 import { getServerGoogleMapsApiKey } from '@/lib/server/env'
 import { getSupabaseServerClient } from '@/lib/supabase-server'
+import { proxifyPhotoUrl } from '@/lib/utils/photo-url'
 
 type GooglePlace = {
   place_id: string
@@ -147,8 +148,9 @@ function extractReviewsFromRaw(raw: Record<string, unknown>): string[] {
   return snippets.filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
 }
 
-function buildGooglePhotoUrl(photoReference: string, key: string): string {
-  return `https://maps.googleapis.com/maps/api/place/photo?maxwidth=900&photo_reference=${encodeURIComponent(photoReference)}&key=${encodeURIComponent(key)}`
+function buildGooglePhotoUrl(photoReference: string, _key: string): string {
+  // Proxy server-side para no exponer la API key al browser ni sufrir restricciones de referer/IP
+  return `/api/photos?ref=${encodeURIComponent(photoReference)}&w=900`
 }
 
 function extractContactFromRaw(raw: Record<string, unknown>): {
@@ -367,7 +369,9 @@ async function discoverFromPreloadedPlaces(location: string, key?: string, provi
     const taggingMeta = (p.tagging_meta && typeof p.tagging_meta === 'object') ? p.tagging_meta as PlaceTaggingMeta : undefined
     const rawPayload = (p.raw_payload && typeof p.raw_payload === 'object') ? p.raw_payload : {}
     const contact = extractContactFromRaw(rawPayload)
-    const galleryFromDb = Array.isArray(p.gallery) ? p.gallery.slice(0, 3).map((g: unknown) => String(g)) : []
+    const galleryFromDb = Array.isArray(p.gallery)
+      ? p.gallery.slice(0, 3).map((g: unknown) => proxifyPhotoUrl(String(g)) || String(g))
+      : []
     const rawBase = (rawPayload.base && typeof rawPayload.base === 'object') ? (rawPayload.base as Record<string, unknown>) : null
     const rawBasePhotos = rawBase && Array.isArray(rawBase.photos) ? rawBase.photos : []
     const firstRawRef =
@@ -377,7 +381,7 @@ async function discoverFromPreloadedPlaces(location: string, key?: string, provi
         ? String((rawBasePhotos[0] as Record<string, unknown>).photo_reference)
         : null
     const fallbackPhoto = firstRawRef && key ? buildGooglePhotoUrl(firstRawRef, key) : null
-    const photoUrl = galleryFromDb[0] || fallbackPhoto || null
+    const photoUrl = proxifyPhotoUrl(galleryFromDb[0] || fallbackPhoto || null)
     const gallery = photoUrl
       ? [photoUrl, ...galleryFromDb.filter((g: string) => g !== photoUrl)].slice(0, 3)
       : galleryFromDb
