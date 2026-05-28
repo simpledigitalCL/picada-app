@@ -94,6 +94,225 @@ export function invalidateConfigCache() {
   configCache = null
 }
 
+// ─── Anti-abuso (escalera + dedupe) ───────────────────────────────────────────
+
+type ActionMetadata = Record<string, unknown>
+
+const SEEN_KEY = 'picada.achieve.seen.v1'
+const COOLDOWN_KEY = 'picada.achieve.cooldown.v1'
+
+/** Preview parcial solo para retos de alta rareza (ver shouldShowDiscoveryPreview). */
+function shouldShowDiscoveryPreview(challenge: DynamicChallenge): boolean {
+  return challenge.rarity === 'Epic' || challenge.rarity === 'Legendary'
+}
+
+type SeenStore = Record<string, Record<string, number>>
+type CooldownStore = Record<string, number>
+
+function readSeen(): SeenStore {
+  if (typeof window === 'undefined') return {}
+  try {
+    return JSON.parse(window.localStorage.getItem(SEEN_KEY) ?? '{}') as SeenStore
+  } catch {
+    return {}
+  }
+}
+
+function writeSeen(store: SeenStore): void {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(SEEN_KEY, JSON.stringify(store))
+}
+
+function readCooldown(): CooldownStore {
+  if (typeof window === 'undefined') return {}
+  try {
+    return JSON.parse(sessionStorage.getItem(COOLDOWN_KEY) ?? '{}') as CooldownStore
+  } catch {
+    return {}
+  }
+}
+
+function writeCooldown(store: CooldownStore): void {
+  if (typeof window === 'undefined') return
+  sessionStorage.setItem(COOLDOWN_KEY, JSON.stringify(store))
+}
+
+function localDateKey(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function markSeen(bucket: string, id: string): void {
+  const store = readSeen()
+  if (!store[bucket]) store[bucket] = {}
+  store[bucket][id] = Date.now()
+  writeSeen(store)
+}
+
+function hasSeen(bucket: string, id: string): boolean {
+  return Boolean(readSeen()[bucket]?.[id])
+}
+
+function cooldownMs(key: string, ms: number): boolean {
+  const store = readCooldown()
+  const last = store[key] ?? 0
+  const now = Date.now()
+  if (now - last < ms) return false
+  store[key] = now
+  writeCooldown(store)
+  return true
+}
+
+function inferPlaceCategories(metadata?: ActionMetadata): string[] {
+  const cats = new Set<string>()
+  const primary = metadata?.category
+  if (typeof primary === 'string' && primary) cats.add(primary)
+  if (Array.isArray(metadata?.categories)) {
+    for (const c of metadata.categories) {
+      if (typeof c === 'string' && c) cats.add(c)
+    }
+  }
+  const hay = [
+    String(metadata?.placeName ?? metadata?.name ?? ''),
+    ...(Array.isArray(metadata?.tags) ? metadata.tags.map(String) : []),
+  ]
+    .join(' ')
+    .toLowerCase()
+  if (/completo|hot.?dog|vienesa|tomate.?mayo/i.test(hay)) cats.add('completos')
+  return [...cats]
+}
+
+function challengeMatchesCategory(
+  challenge: DynamicChallenge,
+  metadata?: ActionMetadata,
+): boolean {
+  if (!challenge.category) return true
+  if (challenge.action_type === 'category_visit') {
+    return inferPlaceCategories(metadata).includes(challenge.category)
+  }
+  if (challenge.action_type === 'review_written') {
+    return inferPlaceCategories(metadata).includes(challenge.category)
+  }
+  return true
+}
+
+function pickLadderChallenge(
+  challenges: DynamicChallenge[],
+  getCount: (challengeId: string) => number,
+): DynamicChallenge | null {
+  const sorted = [...challenges].sort((a, b) => a.target - b.target)
+  for (const c of sorted) {
+    if (getCount(c.id) >= c.target) continue
+    return c
+  }
+  return null
+}
+
+function acceptActionForAchievements(
+  actionType: string,
+  metadata?: ActionMetadata,
+): { ok: true } | { ok: false } {
+  const placeId = String(metadata?.placeId ?? '').trim()
+
+  switch (actionType) {
+    case 'place_view': {
+      if (!placeId) return { ok: false }
+      if (hasSeen('place_view', placeId)) return { ok: false }
+      markSeen('place_view', placeId)
+      return { ok: true }
+    }
+    case 'category_visit': {
+      if (!placeId) return { ok: false }
+      const cat = String(metadata?.category ?? inferPlaceCategories(metadata)[0] ?? 'any')
+      const bucket = `category_visit:${cat}`
+      if (hasSeen(bucket, placeId)) return { ok: false }
+      markSeen(bucket, placeId)
+      return { ok: true }
+    }
+    case 'map_view':
+      return cooldownMs('map_view', 45_000) ? { ok: true } : { ok: false }
+    case 'app_open': {
+      const day = localDateKey()
+      if (hasSeen('app_open', day)) return { ok: false }
+      markSeen('app_open', day)
+      return { ok: true }
+    }
+    case 'like_given': {
+      const postId = String(metadata?.postId ?? '').trim()
+      if (postId) {
+        if (hasSeen('like_given', postId)) return { ok: false }
+        markSeen('like_given', postId)
+        return { ok: true }
+      }
+      return cooldownMs('like_given', 3_000) ? { ok: true } : { ok: false }
+    }
+    case 'picada_voted': {
+      const picadaId = String(metadata?.picadaId ?? '').trim()
+      if (!picadaId || hasSeen('picada_voted', picadaId)) return { ok: false }
+      markSeen('picada_voted', picadaId)
+      return { ok: true }
+    }
+    case 'review_written': {
+      const postId = String(metadata?.postId ?? metadata?.reviewId ?? '').trim()
+      if (postId) {
+        if (hasSeen('review_written', postId)) return { ok: false }
+        markSeen('review_written', postId)
+        return { ok: true }
+      }
+      return cooldownMs('review_written', 5_000) ? { ok: true } : { ok: false }
+    }
+    case 'photo_uploaded': {
+      const postId = String(metadata?.postId ?? '').trim()
+      if (postId) {
+        if (hasSeen('photo_uploaded', postId)) return { ok: false }
+        markSeen('photo_uploaded', postId)
+        return { ok: true }
+      }
+      return cooldownMs('photo_uploaded', 5_000) ? { ok: true } : { ok: false }
+    }
+    case 'scan_complete':
+      return cooldownMs('scan_complete', 8_000) ? { ok: true } : { ok: false }
+    case 'profile_shared':
+      return cooldownMs('profile_shared', 30_000) ? { ok: true } : { ok: false }
+    case 'mood_used':
+      return cooldownMs('mood_used', 10_000) ? { ok: true } : { ok: false }
+    default:
+      return cooldownMs(`action:${actionType}`, 2_000) ? { ok: true } : { ok: false }
+  }
+}
+
+// ─── Cola de modales de premio (uno a la vez) ─────────────────────────────────
+
+type RewardModalPayload = {
+  challenge: DynamicChallenge
+  progress: number
+  ratio: number
+  userId: string
+  unlockedAt: string
+  [key: string]: unknown
+}
+
+const rewardQueue: RewardModalPayload[] = []
+let rewardModalBusy = false
+
+function enqueueRewardModal(payload: RewardModalPayload): void {
+  if (typeof window === 'undefined') return
+  rewardQueue.push(payload)
+  drainRewardModals()
+}
+
+function drainRewardModals(): void {
+  if (rewardModalBusy || rewardQueue.length === 0) return
+  rewardModalBusy = true
+  window.dispatchEvent(new CustomEvent('picada:show-reward-modal', { detail: rewardQueue.shift() }))
+}
+
+/** Llamar al cerrar RewardModal para encadenar el siguiente premio pendiente. */
+export function notifyRewardModalClosed(): void {
+  rewardModalBusy = false
+  drainRewardModals()
+}
+
 // ─── Progreso por reto ────────────────────────────────────────────────────────
 
 const PROGRESS_PREFIX = 'picada.achieve.progress.'
@@ -264,53 +483,59 @@ export async function trackAction(
 ): Promise<TrackActionResult[]> {
   if (typeof window === 'undefined') return []
 
+  const guard = acceptActionForAchievements(actionType, metadata)
+  if (!guard.ok) return []
+
   const challenges = await loadChallengesConfig()
-  const results: TrackActionResult[] = []
+  const eligible = challenges.filter(
+    c =>
+      c.action_type === actionType &&
+      isInTimeRange(c.time_range) &&
+      challengeMatchesCategory(c, metadata),
+  )
 
-  const matching = challenges.filter(c => c.action_type === actionType)
+  const challenge = pickLadderChallenge(eligible, id => loadProgress(id).count)
+  if (!challenge) return []
 
-  for (const challenge of matching) {
-    if (!isInTimeRange(challenge.time_range)) continue
+  const prev = loadProgress(challenge.id)
+  if (prev.rewardShown) return []
 
-    const prev = loadProgress(challenge.id)
-    if (prev.rewardShown) continue
+  const newCount = Math.min(prev.count + 1, challenge.target)
+  const ratio = newCount / challenge.target
 
-    const newCount = Math.min(prev.count + 1, challenge.target)
-    const ratio = newCount / challenge.target
+  let discoveryTriggered = false
+  let rewardTriggered = false
 
-    let discoveryTriggered = false
-    let rewardTriggered = false
+  const next: AchievementProgress = { ...prev, count: newCount }
 
-    const next: AchievementProgress = { ...prev, count: newCount }
-
-    // Umbral de descubrimiento — específico por reto
-    if (!prev.discoveryShown && ratio >= challenge.reveal_threshold) {
-      next.discoveryShown = true
-      discoveryTriggered = true
+  if (!prev.discoveryShown && ratio >= challenge.reveal_threshold) {
+    next.discoveryShown = true
+    discoveryTriggered = true
+    if (shouldShowDiscoveryPreview(challenge)) {
       window.dispatchEvent(
         new CustomEvent('picada:show-discovery-toast', {
           detail: { challenge, progress: newCount, ratio, userId, ...metadata },
         }),
       )
     }
-
-    // Completado al 100%
-    if (ratio >= 1.0 && !prev.rewardShown) {
-      next.rewardShown = true
-      next.unlockedAt = new Date().toISOString()
-      rewardTriggered = true
-      window.dispatchEvent(
-        new CustomEvent('picada:show-reward-modal', {
-          detail: { challenge, progress: newCount, ratio, userId, unlockedAt: next.unlockedAt, ...metadata },
-        }),
-      )
-    }
-
-    saveProgress(challenge.id, next)
-    results.push({ challengeId: challenge.id, progress: newCount, ratio, discoveryTriggered, rewardTriggered })
   }
 
-  return results
+  if (ratio >= 1.0 && !prev.rewardShown) {
+    next.rewardShown = true
+    next.unlockedAt = new Date().toISOString()
+    rewardTriggered = true
+    enqueueRewardModal({
+      challenge,
+      progress: newCount,
+      ratio,
+      userId,
+      unlockedAt: next.unlockedAt,
+      ...metadata,
+    })
+  }
+
+  saveProgress(challenge.id, next)
+  return [{ challengeId: challenge.id, progress: newCount, ratio, discoveryTriggered, rewardTriggered }]
 }
 
 // ─── Logro destacado (Equipar) ────────────────────────────────────────────────
@@ -376,13 +601,57 @@ export function initAchievementEngine(userId: string): () => void {
     handlers.push({ event, fn })
   }
 
-  on('picada:review-published', 'review_written')
-  on('picada:photo-uploaded', 'photo_uploaded')
+  const placeMeta = (e: Event) => {
+    const d = ((e as CustomEvent).detail || {}) as Record<string, unknown>
+    const categories = inferPlaceCategories(d)
+    return { ...d, categories, category: d.category ?? categories[0] }
+  }
+
+  const reviewMeta = (e: Event) => {
+    const d = ((e as CustomEvent).detail || {}) as Record<string, unknown>
+    return {
+      postId: d.id ?? d.postId,
+      placeId: d.placeId,
+      placeName: d.place,
+      tags: d.tags,
+      category: d.category,
+      categories: inferPlaceCategories({
+        placeName: d.place,
+        tags: d.tags,
+        category: d.category,
+      }),
+    }
+  }
+
+  on('picada:review-published', 'review_written', reviewMeta)
+  on('picada:photo-uploaded', 'photo_uploaded', e => {
+    const d = ((e as CustomEvent).detail || {}) as Record<string, unknown>
+    return { postId: d.id ?? d.postId }
+  })
   on('picada:scan-complete', 'scan_complete')
-  on('picada:vote-granted', 'picada_voted')
+  on('picada:vote-granted', 'picada_voted', e => {
+    const d = ((e as CustomEvent).detail || {}) as Record<string, unknown>
+    return { picadaId: d.picadaId, placeName: d.placeName }
+  })
   on('picada:map-viewed', 'map_view')
-  on('picada:like-given', 'like_given')
-  on('picada:place-visited', 'place_view')
+  on('picada:like-given', 'like_given', e => {
+    const d = ((e as CustomEvent).detail || {}) as Record<string, unknown>
+    return { postId: d.postId }
+  })
+  const onPlaceVisited = (e: Event) => {
+    const meta = placeMeta(e)
+    void trackAction(userId, 'place_view', meta)
+    const cats = inferPlaceCategories(meta)
+    const seenCat = new Set<string>()
+    for (const cat of cats) {
+      if (seenCat.has(cat)) continue
+      seenCat.add(cat)
+      void trackAction(userId, 'category_visit', { ...meta, category: cat })
+    }
+  }
+  window.addEventListener('picada:place-visited', onPlaceVisited)
+  handlers.push({ event: 'picada:place-visited', fn: onPlaceVisited })
+
   on('picada:app-opened', 'app_open')
   on('picada:mood-used', 'mood_used')
   on('picada:profile-shared', 'profile_shared')

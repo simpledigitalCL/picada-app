@@ -598,7 +598,7 @@ export function SocialCommunityFeed({
 
     const allTags = [...(post.tags || []), ...(post.mood_tags || [])]
     if (!isLiked) {
-      window.dispatchEvent(new CustomEvent('picada:like-given'))
+      window.dispatchEvent(new CustomEvent('picada:like-given', { detail: { postId: post.id } }))
     }
     fetch('/api/likes', {
       method: 'POST',

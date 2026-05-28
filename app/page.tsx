@@ -267,7 +267,14 @@ export default function Home() {
       }
     } catch { /* ignore */ }
     // Achievement: contar vistas de locales
-    window.dispatchEvent(new CustomEvent('picada:place-visited', { detail: { placeId: r.id, placeName: r.name } }))
+    window.dispatchEvent(new CustomEvent('picada:place-visited', {
+      detail: {
+        placeId: r.id,
+        placeName: r.name,
+        category: r.category,
+        tags: r.tags,
+      },
+    }))
   }
   const handleClose  = () => {
     if (pickerOpen || pickerBlock) return
