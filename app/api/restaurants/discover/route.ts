@@ -1074,8 +1074,11 @@ export async function GET(req: Request) {
 
   // Fast path: snapshot diario primero — 1 sola query antes de cualquier otra cosa.
   // Si existe, se devuelve sin leer los 4 contadores de budget.
+  const supabaseOk = Boolean(getSupabaseServerClient())
+  console.log(`[discover] loc=${normalizedLocation} key=${locationDailySnapshotKey} supabase=${supabaseOk}`)
   const dailySnapshot = await readDiscoveryCacheByKey(locationDailySnapshotKey)
   const t1 = Date.now()
+  console.log(`[discover] snapshot=${dailySnapshot ? 'HIT' : 'MISS'} isArr=${Array.isArray(dailySnapshot?.payload)} len=${Array.isArray(dailySnapshot?.payload) ? dailySnapshot!.payload.length : 0} t=${t1-t0}ms`)
   if (dailySnapshot && Array.isArray(dailySnapshot.payload) && dailySnapshot.payload.length > 0) {
     const base = dailySnapshot.payload as DiscoverItem[]
     const withTags = await enrichDiscoverTags(base)
