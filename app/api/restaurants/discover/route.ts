@@ -1066,13 +1066,16 @@ export async function GET(req: Request) {
   if (!location && !hasGeo) return NextResponse.json({ items: [], source: 'disabled' })
   const normalizedLocation = normalizeLocationKey(location || `${latQ},${lngQ}`)
   const locationDailySnapshotKey = locationDailyKey(normalizedLocation)
+  const t0 = Date.now()
 
   // Fast path: snapshot diario primero — 1 sola query antes de cualquier otra cosa.
   // Si existe, se devuelve sin leer los 4 contadores de budget.
   const dailySnapshot = await readDiscoveryCacheByKey(locationDailySnapshotKey)
+  const t1 = Date.now()
   if (dailySnapshot && Array.isArray(dailySnapshot.payload) && dailySnapshot.payload.length > 0) {
     const base = dailySnapshot.payload as DiscoverItem[]
     const withTags = await enrichDiscoverTags(base)
+    const t2 = Date.now()
     const scored = withTags.map(item => {
       const m = scoreByRestrictions(item, restrictions)
       return { ...item, matchScore: m.score, matchReason: m.reason }
@@ -1080,7 +1083,7 @@ export async function GET(req: Request) {
     return NextResponse.json({
       items: finalizeDiscoverItems(filterByRadial(scored, hasGeo, latQ, lngQ, radiusKmQ)),
       source: dailySnapshot.source,
-      diagnostics: { cacheHit: true, snapshot: 'daily', fastPath: true },
+      diagnostics: { cacheHit: true, snapshot: 'daily', fastPath: true, timings: { snapshotRead: t1-t0, enrichTags: t2-t1, total: t2-t0 } },
     }, { headers: { 'Cache-Control': 'public, s-maxage=900, stale-while-revalidate=3600' } })
   }
 
@@ -1106,11 +1109,13 @@ export async function GET(req: Request) {
   // Garantiza que la función nunca exceda el límite de Vercel ni bloquee el browser.
   const slowPathDeadline = Date.now() + 8000
 
+  const t2 = Date.now()
   // Cargar en paralelo: caché de inventario + locales ya guardados en BD
   const [cached, preloaded] = await Promise.all([
     readDiscoveryCache(normalizedLocation),
     discoverFromPreloadedPlaces(location, key || undefined),
   ])
+  const t3 = Date.now()
   const inventoryItems = (cached?.payload as DiscoverItem[] | undefined) || []
   const inventoryIds = new Set(inventoryItems.map(i => i.id))
   const freshFromDb = preloaded.filter(p => !inventoryIds.has(p.id))
@@ -1149,10 +1154,12 @@ export async function GET(req: Request) {
     }
   }
 
+  const t4 = Date.now()
   // Fast return: si ya hay suficientes items, no llamar a Google TextSearch.
   // También aplica si se agotó el deadline (retornar lo que hay de Supabase).
   if (baseItems.length >= 3 || Date.now() >= slowPathDeadline) {
     const withTags = await enrichDiscoverTags(baseItems)
+    const t5 = Date.now()
     const scored = withTags.map(item => {
       const m = scoreByRestrictions(item, restrictions)
       return { ...item, matchScore: m.score, matchReason: m.reason }
@@ -1163,7 +1170,7 @@ export async function GET(req: Request) {
     return NextResponse.json({
       items: finalizeDiscoverItems(radialFiltered),
       source,
-      diagnostics: { cacheHit: true, snapshot: 'supabase_fast' },
+      diagnostics: { cacheHit: true, snapshot: 'supabase_fast', timings: { snapshotRead: t1-t0, budgets: t2-t1, preload: t3-t2, fase1: t4-t3, enrichTags: t5-t4, total: t5-t0 } },
     }, { headers: { 'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=1800' } })
   }
 
