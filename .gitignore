@@ -1,5 +1,8 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
+# Claude local settings (may contain secrets in allowed-commands history)
+.claude/settings.local.json
+
 # dependencies
 /node_modules
 
