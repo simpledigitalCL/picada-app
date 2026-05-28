@@ -28,6 +28,12 @@ CAP_SERVER_URL=http://<LOCAL_IP>:3002 npx cap sync android
 
 No test suite exists yet. TypeScript checking: `npx tsc --noEmit`.
 
+```bash
+# Playwright integration scripts (require `npm install` first, then `npx playwright install chromium`)
+node scripts/test-auth.mjs [prod|local]           # Test login flow end-to-end
+node scripts/test-discover-cache.mjs [prod|local] [location]  # Test discover cache hit
+```
+
 ### Android Studio (snap install)
 
 If Android Studio is installed via snap, `cap:open:android` will fail. Set this env var:
@@ -150,6 +156,18 @@ Components communicate via `window.dispatchEvent`. Key events:
 | `picada:require-auth` | none | `app/page.tsx` (opens login modal) |
 | `picada:xp-granted` | `{ amount, currentTotal }` | XP notification toast |
 | `picada:location-changed` | none | `app-store.ts`, discover components |
+
+### Auth gates and login flow
+
+Three sequential gates block the app on first visit, all controlled by `app/page.tsx`:
+
+1. **Onboarding modal** (`z-[100]`) — shown when `localStorage['picada.onboarding.done.v1']` is absent. Covers the entire screen; no escape route. Completes when user clicks "Explorar Picada.App" → sets the key.
+2. **Location gate** (`Dialog` with `onOpenChange={() => {}}`) — shown after onboarding if no location in localStorage. Cannot be closed without choosing a location. Bypassed when `picada.location.v1` is set in localStorage.
+3. **Auth required dialog** (`authRequiredOpen`) — opened by `picada:require-auth` DOM event (e.g., tapping "Iniciar sesión para participar" in the social feed). Contains `AuthQuickRegister`.
+
+`AuthQuickRegister` (`components/auth/auth-quick-register.tsx`) also lives in a second location: Social tab → sub-tab "Perfil" → ⚙️ settings → "Cuenta". The component handles sign-in, sign-up, and password reset against Supabase Auth.
+
+After successful login, `app/page.tsx` `onAuthStateChange` handler sets `isAuthed = true` and closes `authRequiredOpen` automatically.
 
 ### User identity
 
@@ -282,7 +300,10 @@ supabase.from('table').insert({...}).then(undefined, () => undefined) as Promise
 
 **`getSupabaseServerClient()` returns `null` if `SUPABASE_SERVICE_ROLE_KEY` is missing** — always null-check the result in API routes.
 
-**`SUPABASE_URL` in Vercel must match the actual project URL** — `lib/server/env.ts` reads `SUPABASE_URL` first, then falls back to `NEXT_PUBLIC_SUPABASE_URL`. If `SUPABASE_URL` is set in Vercel env vars to a stale/wrong URL, all server-side Supabase calls fail silently with `TypeError: fetch failed`, breaking the entire discover cache (and any other server-side DB operation). Diagnose with `GET /api/internal/health`. Fix: update `SUPABASE_URL` in Vercel Dashboard → Project Settings → Environment Variables to match `https://<project-ref>.supabase.co`.
+**Both `SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_URL` in Vercel must point to the correct project** — they are independent env vars and both can be set to a stale URL independently:
+- `SUPABASE_URL` (server-side): read by `lib/server/env.ts` first; if wrong, all server-side Supabase calls fail with `TypeError: fetch failed`, breaking the discover cache and every API route.
+- `NEXT_PUBLIC_SUPABASE_URL` (client bundle): baked into the JavaScript bundle **at build time**. If wrong, `signInWithPassword` and all browser-side Supabase calls hit the wrong domain (`ERR_NAME_NOT_RESOLVED`), breaking auth and all client reads. Changing this var requires a new deploy to take effect.
+- Diagnose server-side URL with `GET /api/internal/health` (dev-only; returns the URL being used and whether a DB query succeeds). Fix both in Vercel Dashboard → Project Settings → Environment Variables, then redeploy.
 
 **Never store Google Maps photo URLs with the API key in `gallery`** — they cause 50+ second load times in production because the browser can't call the Photos API directly (key restrictions). Always use `proxifyPhotoUrl()` when reading `gallery` from the DB, and use `/api/photos?ref=PHOTO_REFERENCE` as the URL format when building new photo URLs. The long-term target is Supabase Storage (tracked in DEV-24).
 

@@ -863,31 +863,15 @@ async function readDiscoveryCache(location: string) {
 
 async function readDiscoveryCacheByKey(cacheKey: string) {
   const supabase = getSupabaseServerClient()
-  if (!supabase) {
-    console.log(`DIAG no_supabase`)
-    return null
-  }
-  const t0 = Date.now()
+  if (!supabase) return null
   const { data, error } = await supabase
     .from('place_discovery_cache')
     .select('payload, source, expires_at')
     .eq('location_key', cacheKey)
     .maybeSingle()
-  const qt = Date.now() - t0
-  if (error) {
-    console.log(`DIAG fetch_error qt=${qt}ms code=${error.code} msg=${String(error.message).slice(0, 60)}`)
-    return null
-  }
-  if (!data) {
-    console.log(`DIAG norow qt=${qt}ms key=${cacheKey.slice(0, 30)}`)
-    return null
-  }
+  if (error || !data) return null
   const expiresAt = new Date(data.expires_at)
-  const expired = Number.isNaN(expiresAt.getTime()) || expiresAt.getTime() < Date.now()
-  const isArr = Array.isArray(data.payload)
-  const len = isArr ? (data.payload as unknown[]).length : -1
-  console.log(`DIAG ${expired ? 'expired' : 'ok'} isArr=${isArr} len=${len} qt=${qt}ms`)
-  if (expired) return null
+  if (Number.isNaN(expiresAt.getTime()) || expiresAt.getTime() < Date.now()) return null
   return data
 }
 
