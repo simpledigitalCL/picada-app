@@ -1170,7 +1170,7 @@ export async function GET(req: Request) {
     })
     const withOffers = await attachOffersBatch(scored)
     const radialFiltered = filterByRadial(withOffers, hasGeo, latQ, lngQ, radiusKmQ)
-    writeDiscoveryCache(locationDailySnapshotKey, source, radialFiltered, LOCATION_DAILY_CACHE_TTL_MS, { persistPlaces: false }).then(undefined, () => undefined)
+    await writeDiscoveryCache(locationDailySnapshotKey, source, radialFiltered, LOCATION_DAILY_CACHE_TTL_MS, { persistPlaces: false })
     return NextResponse.json({
       items: finalizeDiscoverItems(radialFiltered),
       source,
@@ -1244,13 +1244,13 @@ export async function GET(req: Request) {
     })
     const withOffers = await attachOffersBatch(scored)
     const radialFiltered = filterByRadial(withOffers, hasGeo, latQ, lngQ, radiusKmQ)
-    writeDiscoveryCache(
+    await writeDiscoveryCache(
       locationDailySnapshotKey,
       source,
       radialFiltered,
       LOCATION_DAILY_CACHE_TTL_MS,
       { persistPlaces: false },
-    ).then(undefined, () => undefined)
+    )
     return NextResponse.json({
       items: finalizeDiscoverItems(radialFiltered),
       source,
@@ -1274,13 +1274,13 @@ export async function GET(req: Request) {
   })
   const withOffers = await attachOffersBatch(scored)
   const radialFiltered = filterByRadial(withOffers, hasGeo, latQ, lngQ, radiusKmQ)
-  writeDiscoveryCache(
+  await writeDiscoveryCache(
     locationDailySnapshotKey,
     'openstreetmap',
     radialFiltered,
     LOCATION_DAILY_CACHE_TTL_MS,
     { persistPlaces: false },
-  ).then(undefined, () => undefined)
+  )
   return NextResponse.json({
     items: finalizeDiscoverItems(radialFiltered),
     source: 'openstreetmap',

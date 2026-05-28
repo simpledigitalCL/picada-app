@@ -534,6 +534,11 @@ export function HotPicadaView({ locationQuery, onSelect, onLocationChange, onNew
             </h1>
             <p className="text-xs text-muted-foreground mt-1 leading-snug">
               Ranking comunitario · Top 200 para entrar
+              {process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA && (
+                <span className="ml-2 font-mono text-[9px] text-muted-foreground/40">
+                  {process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA.slice(0, 7)}
+                </span>
+              )}
             </p>
             {loading ? <p className="text-[11px] text-orange-600 mt-1">Cargando locales y señales...</p> : null}
             {!loading && discoverNotice ? <p className="text-[11px] text-amber-700 mt-1">{discoverNotice}</p> : null}
