@@ -864,7 +864,7 @@ async function readDiscoveryCache(location: string) {
 async function readDiscoveryCacheByKey(cacheKey: string) {
   const supabase = getSupabaseServerClient()
   if (!supabase) {
-    console.log(`DIAG key=${cacheKey} result=null_no_supabase`)
+    console.log(`DIAG no_supabase`)
     return null
   }
   const t0 = Date.now()
@@ -875,17 +875,18 @@ async function readDiscoveryCacheByKey(cacheKey: string) {
     .maybeSingle()
   const qt = Date.now() - t0
   if (error) {
-    console.log(`DIAG key=${cacheKey} result=error code=${error.code} msg=${error.message} qt=${qt}ms`)
+    console.log(`DIAG fetch_error qt=${qt}ms code=${error.code} msg=${String(error.message).slice(0, 60)}`)
     return null
   }
   if (!data) {
-    console.log(`DIAG key=${cacheKey} result=norow qt=${qt}ms`)
+    console.log(`DIAG norow qt=${qt}ms key=${cacheKey.slice(0, 30)}`)
     return null
   }
   const expiresAt = new Date(data.expires_at)
   const expired = Number.isNaN(expiresAt.getTime()) || expiresAt.getTime() < Date.now()
   const isArr = Array.isArray(data.payload)
-  console.log(`DIAG key=${cacheKey} result=${expired ? 'expired' : 'ok'} isArr=${isArr} len=${isArr ? (data.payload as unknown[]).length : 'N/A'} exp=${data.expires_at} qt=${qt}ms`)
+  const len = isArr ? (data.payload as unknown[]).length : -1
+  console.log(`DIAG ${expired ? 'expired' : 'ok'} isArr=${isArr} len=${len} qt=${qt}ms`)
   if (expired) return null
   return data
 }
