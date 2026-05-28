@@ -91,6 +91,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "cross-env": "^10.1.0",
+    "playwright": "^1.60.0",
     "postcss": "^8.5",
     "puppeteer": "^24.42.0",
     "tailwindcss": "^4.1.9",

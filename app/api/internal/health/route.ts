@@ -2,6 +2,10 @@ import { NextResponse } from 'next/server'
 import { getSupabaseServerClient } from '@/lib/supabase-server'
 
 export async function GET() {
+  if (process.env.NODE_ENV !== 'development') {
+    return NextResponse.json({ ok: false, reason: 'only_available_in_dev' }, { status: 403 })
+  }
+
   const supabase = getSupabaseServerClient()
   if (!supabase) {
     return NextResponse.json({ ok: false, reason: 'no_supabase_client', hint: 'SUPABASE_SERVICE_ROLE_KEY missing or SUPABASE_URL wrong' })
