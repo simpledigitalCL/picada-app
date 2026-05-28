@@ -213,13 +213,20 @@ User submissions (`POST /api/places/submit`) insert with `status: 'pending'` —
 2. **Supabase fast-return**: if no daily snapshot, reads inventory cache + `discoverFromPreloadedPlaces` in parallel. If ≥ 3 items exist, returns immediately. FASE 1 (Google Details enrichment) runs **fire-and-forget** in this case — it does not block the response.
 3. **Google bootstrap** (FASE 1 + FASE 2): runs only when the DB has < 3 items for a location. A hard deadline of **8 seconds** is set at the start of the slow path.
 
-**All `writeDiscoveryCache` calls are fire-and-forget** (`.then(undefined, () => undefined)`) — they must never block the response. This is critical: these calls do N×2 DB upserts and would add 10-20s if awaited.
+**Vercel freezes the serverless function immediately after `return NextResponse.json()`** — any fire-and-forget promise that hasn't completed yet is suspended and may never finish. Because of this, the daily snapshot write uses `await` (it's a single upsert, ~50ms):
+```ts
+await writeDiscoveryCache(locationDailySnapshotKey, source, items, TTL, { persistPlaces: false })
+return NextResponse.json({...})
+```
+The inventory cache writes (`persistPlaces: true`) remain fire-and-forget because they do N×2 DB upserts and would add 10-20s if awaited — they're acceptable to lose on function freeze.
+
+**Do not change the daily snapshot write back to fire-and-forget** — it was fire-and-forget before and Vercel was killing it every time, causing every request to hit the 50-second Google bootstrap path.
+
+**Do not revert fire-and-forget on inventory cache writes** — awaiting `writeDiscoveryCache` with `persistPlaces: true` blocks responses for 10-20s due to concurrent place upserts on the free Supabase plan.
 
 **Timeouts**: Google Details API calls → 2000ms. Google TextSearch → 4000ms. Pause between TextSearch pages → 600ms. These are intentionally short to respect Vercel's function timeout.
 
 **Do not re-add `shouldBypassFastPath` logic** — it was removed because it caused the daily snapshot to be bypassed on every request when any items had missing phone/photo/reviews, making the fast path effectively dead and causing 45-second loads in production.
-
-**Do not revert fire-and-forget writes back to `await`** — awaiting `writeDiscoveryCache` with `persistPlaces: true` blocks responses for 10-20s due to concurrent place upserts on the free Supabase plan.
 
 **Cache-Control headers**: the daily fast path returns `Cache-Control: public, s-maxage=900, stale-while-revalidate=3600`. The Supabase fast-return returns `s-maxage=300`. These are intentional for Vercel CDN caching — do not remove them.
 
@@ -236,7 +243,7 @@ Copy `.env.example` to `.env` (this project uses `.env`, not `.env.local`):
 |---|---|
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL (browser) |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key (browser) |
-| `SUPABASE_URL` | Supabase project URL (server) |
+| `SUPABASE_URL` | Supabase project URL (server) — **must match `NEXT_PUBLIC_SUPABASE_URL`**; takes priority over it in `lib/server/env.ts` |
 | `SUPABASE_SERVICE_ROLE_KEY` | Service role key — never expose to client |
 | `GOOGLE_MAPS_API_KEY` | Google Maps Platform (Places API + Geocoding API) |
 | `ANTHROPIC_API_KEY` | Anthropic Claude API |
@@ -274,6 +281,8 @@ supabase.from('table').insert({...}).then(undefined, () => undefined) as Promise
 **`console.error()` in dev triggers Next.js error overlay** — use `console.log()` wrapped in `if (process.env.NODE_ENV === 'development')` for debug logging.
 
 **`getSupabaseServerClient()` returns `null` if `SUPABASE_SERVICE_ROLE_KEY` is missing** — always null-check the result in API routes.
+
+**`SUPABASE_URL` in Vercel must match the actual project URL** — `lib/server/env.ts` reads `SUPABASE_URL` first, then falls back to `NEXT_PUBLIC_SUPABASE_URL`. If `SUPABASE_URL` is set in Vercel env vars to a stale/wrong URL, all server-side Supabase calls fail silently with `TypeError: fetch failed`, breaking the entire discover cache (and any other server-side DB operation). Diagnose with `GET /api/internal/health`. Fix: update `SUPABASE_URL` in Vercel Dashboard → Project Settings → Environment Variables to match `https://<project-ref>.supabase.co`.
 
 **Never store Google Maps photo URLs with the API key in `gallery`** — they cause 50+ second load times in production because the browser can't call the Photos API directly (key restrictions). Always use `proxifyPhotoUrl()` when reading `gallery` from the DB, and use `/api/photos?ref=PHOTO_REFERENCE` as the URL format when building new photo URLs. The long-term target is Supabase Storage (tracked in DEV-24).
 
