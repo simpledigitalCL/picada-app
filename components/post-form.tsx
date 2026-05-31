@@ -244,7 +244,7 @@ export function PostForm({ type, locationQuery, contextRestaurant, draft, onClos
     window.dispatchEvent(new CustomEvent('picada:review-published', { detail: localPost }))
     window.dispatchEvent(new CustomEvent('picada:post-published'))
     if (localPost.type === 'photo') {
-      window.dispatchEvent(new CustomEvent('picada:photo-uploaded'))
+      window.dispatchEvent(new CustomEvent('picada:photo-uploaded', { detail: { postId: localPost.id } }))
     }
     handleClose()
   }, [type, media, flow, submitter, toast, handleClose])

@@ -6,6 +6,7 @@ import { Share2, Sparkles, Trophy, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { equipAchievement, type DynamicChallenge, type Rarity } from '@/lib/gamification/achievement-engine'
+import { notifyRewardModalClosed } from '@/lib/gamification/achievement-engine'
 
 // ─── Estilos por rareza ───────────────────────────────────────────────────────
 
@@ -165,6 +166,11 @@ export function RewardModal() {
     return () => window.removeEventListener('picada:show-reward-modal', handler)
   }, [])
 
+  const closeModal = () => {
+    setEvent(null)
+    notifyRewardModalClosed()
+  }
+
   const handleEquip = () => {
     if (!event) return
     equipAchievement(event.challenge, event.unlockedAt)
@@ -215,7 +221,7 @@ export function RewardModal() {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           className="fixed inset-0 z-[400] flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center"
-          onClick={e => { if (e.target === e.currentTarget) setEvent(null) }}
+          onClick={e => { if (e.target === e.currentTarget) closeModal() }}
         >
           <motion.div
             initial={{ y: 80, scale: 0.92 }}
@@ -227,7 +233,7 @@ export function RewardModal() {
             {/* Cerrar */}
             <button
               type="button"
-              onClick={() => setEvent(null)}
+              onClick={closeModal}
               className="absolute right-4 top-4 flex size-8 items-center justify-center rounded-full bg-white/10 text-white/60 hover:bg-white/20"
               aria-label="Cerrar"
             >

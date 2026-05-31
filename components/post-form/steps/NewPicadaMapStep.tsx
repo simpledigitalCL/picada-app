@@ -1,7 +1,9 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { MapPin, Search, Loader2 } from 'lucide-react'
+import { MapPin, Search, Loader2, LocateFixed } from 'lucide-react'
+import { Capacitor } from '@capacitor/core'
+import { Geolocation } from '@capacitor/geolocation'
 import { Input } from '@/components/ui/input'
 
 export type PlaceGeo = {
@@ -59,6 +61,9 @@ export function NewPicadaMapStep({ lat, lng, address, onLocationSet }: Props) {
   const [query, setQuery]             = useState('')
   const [searching, setSearching]     = useState(false)
   const [searchError, setSearchError] = useState<string | null>(null)
+  const [locating, setLocating]       = useState(false)
+  const [locateError, setLocateError] = useState<string | null>(null)
+  const autoLocatedRef                = useRef(false)
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   const placePinAt = async (L: any, map: any, makePinIcon: () => any, pLat: number, pLng: number) => {
@@ -132,12 +137,9 @@ export function NewPicadaMapStep({ lat, lng, address, onLocationSet }: Props) {
 
       leafletRef.current = { L, map, makePinIcon }
 
-      if (lat == null && navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-          pos => map.setView([pos.coords.latitude, pos.coords.longitude], 16),
-          () => {},
-          { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 },
-        )
+      if (lat == null && !autoLocatedRef.current) {
+        autoLocatedRef.current = true
+        void useDeviceLocation()
       }
     })
 
@@ -148,6 +150,46 @@ export function NewPicadaMapStep({ lat, lng, address, onLocationSet }: Props) {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // ── Device location ───────────────────────────────────────────────────────
+  const useDeviceLocation = async () => {
+    if (!leafletRef.current) return
+    setLocating(true)
+    setLocateError(null)
+    try {
+      let pLat: number
+      let pLng: number
+      if (Capacitor.isNativePlatform()) {
+        const perm = await Geolocation.requestPermissions()
+        if (perm.location !== 'granted' && perm.coarseLocation !== 'granted') {
+          setLocateError('Permiso de ubicación denegado.')
+          return
+        }
+        const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 10000 })
+        pLat = pos.coords.latitude
+        pLng = pos.coords.longitude
+      } else {
+        if (!navigator.geolocation) {
+          setLocateError('Geolocalización no disponible en este navegador.')
+          return
+        }
+        const pos = await new Promise<GeolocationPosition>((resolve, reject) =>
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true, timeout: 10000, maximumAge: 30000,
+          }),
+        )
+        pLat = pos.coords.latitude
+        pLng = pos.coords.longitude
+      }
+      const { L, map, makePinIcon } = leafletRef.current
+      map.setView([pLat, pLng], 17)
+      await placePinAt(L, map, makePinIcon, pLat, pLng)
+    } catch (err: any) {
+      setLocateError(err?.message ? `No se pudo obtener tu ubicación: ${err.message}` : 'No se pudo obtener tu ubicación.')
+    } finally {
+      setLocating(false)
+    }
+  }
 
   // ── Address search ────────────────────────────────────────────────────────
   const handleSearch = async () => {
@@ -219,6 +261,20 @@ export function NewPicadaMapStep({ lat, lng, address, onLocationSet }: Props) {
 
       {searchError && (
         <p className="text-xs text-amber-700 dark:text-amber-400">{searchError}</p>
+      )}
+
+      <button
+        type="button"
+        onClick={useDeviceLocation}
+        disabled={locating}
+        className="w-full h-10 rounded-xl border border-orange-200 bg-orange-50 dark:bg-orange-950/30 dark:border-orange-800 text-orange-700 dark:text-orange-200 text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2"
+      >
+        {locating ? <Loader2 className="size-4 animate-spin" /> : <LocateFixed className="size-4" />}
+        {locating ? 'Obteniendo ubicación…' : 'Usar mi ubicación actual'}
+      </button>
+
+      {locateError && (
+        <p className="text-xs text-amber-700 dark:text-amber-400">{locateError}</p>
       )}
 
       <div ref={mapRef} className="w-full rounded-2xl overflow-hidden border border-border" style={{ height: 240 }} />
