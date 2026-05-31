@@ -1,6 +1,13 @@
 import { NextResponse } from 'next/server'
 import { getSupabaseServerClient } from '@/lib/supabase-server'
 import { placeTextMatchesLocation } from '@/lib/location/query-match'
+import { proxifyPhotoUrl } from '@/lib/utils/photo-url'
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+function stripExtPrefix(id: string): string {
+  return id.replace(/^ext-/, '')
+}
 
 type PicadaRankRow = {
   picada_id: string
@@ -10,6 +17,7 @@ type PicadaRankRow = {
   ranking_score: number
   place_name?: string
   place_address?: string
+  photo_url?: string | null
   maps_url?: string
   quality_score?: number
   engagement_score?: number
@@ -60,6 +68,78 @@ export async function GET(req: Request) {
 
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 })
 
+  // ── Resolución canónica contra `places` ────────────────────────────────────
+  // Cada fila de `picada_event_ranking` viene identificada por whatever id se
+  // emitió en los domain_events (UUID interno, external_id de Google, o un id
+  // con prefijo `ext-…`). Sin resolver, el mismo lugar aparece varias veces en
+  // el ranking (cada id acumula su propio score) y los clientes no pueden
+  // deduplicar contra los items de discover (que vienen indexados por
+  // external_id). Resolvemos todo a la entidad canónica en `places` para:
+  //   1. agregar votos/visitas/reseñas del mismo place bajo una sola entrada,
+  //   2. devolver el external_id canónico como `picada_id` (matchea discover),
+  //   3. exponer la foto desde `gallery[0]` para podios y tarjetas.
+  const rawRows = (data || []) as PicadaRankRow[]
+  const rawIds = Array.from(new Set(rawRows.map(r => r.picada_id).filter(Boolean)))
+  const uuidCandidates = rawIds.filter(id => UUID_RE.test(id))
+  const externalCandidates = Array.from(
+    new Set(rawIds.map(stripExtPrefix).filter(id => id && !UUID_RE.test(id))),
+  )
+
+  type PlaceRow = {
+    id: string
+    external_id: string | null
+    name: string | null
+    address: string | null
+    maps_url: string | null
+    gallery: unknown
+  }
+
+  const placeRows: PlaceRow[] = []
+  if (uuidCandidates.length > 0) {
+    const { data: byId } = await supabase
+      .from('places')
+      .select('id,external_id,name,address,maps_url,gallery')
+      .in('id', uuidCandidates)
+    if (byId) placeRows.push(...(byId as PlaceRow[]))
+  }
+  if (externalCandidates.length > 0) {
+    const { data: byExt } = await supabase
+      .from('places')
+      .select('id,external_id,name,address,maps_url,gallery')
+      .in('external_id', externalCandidates)
+    if (byExt) placeRows.push(...(byExt as PlaceRow[]))
+  }
+
+  const placeByUuid = new Map<string, PlaceRow>()
+  const placeByExternal = new Map<string, PlaceRow>()
+  for (const row of placeRows) {
+    placeByUuid.set(row.id, row)
+    if (row.external_id) placeByExternal.set(row.external_id, row)
+  }
+
+  function firstGalleryUrl(gallery: unknown): string | null {
+    if (!Array.isArray(gallery) || gallery.length === 0) return null
+    const first = gallery[0]
+    if (typeof first === 'string') return first
+    if (first && typeof first === 'object' && typeof (first as { url?: string }).url === 'string') {
+      return (first as { url: string }).url
+    }
+    return null
+  }
+
+  function resolveCanonical(rawId: string): {
+    canonicalId: string
+    placeRow: PlaceRow | null
+  } {
+    const stripped = stripExtPrefix(rawId)
+    if (UUID_RE.test(rawId)) {
+      const row = placeByUuid.get(rawId) || null
+      return { canonicalId: row?.external_id || rawId, placeRow: row }
+    }
+    const row = placeByExternal.get(stripped) || null
+    return { canonicalId: row?.external_id || stripped, placeRow: row }
+  }
+
   // Enriquecimiento opcional con metadata desde últimos eventos.
   const { data: eventRows } = await supabase
     .from('domain_events')
@@ -76,8 +156,11 @@ export async function GET(req: Request) {
 
   for (const row of eventRows || []) {
     const payload = (row.payload || {}) as Record<string, unknown>
-    const id = String(payload.picadaId || payload.placeId || '').trim()
-    if (!id) continue
+    const rawId = String(payload.picadaId || payload.placeId || '').trim()
+    if (!rawId) continue
+    // Normalizamos al mismo id canónico que usamos para `rawRows` para que
+    // quality/engagement/meta queden agregados bajo la entidad única.
+    const id = resolveCanonical(rawId).canonicalId
 
     if (!metaById[id]) {
       metaById[id] = {
@@ -103,8 +186,30 @@ export async function GET(req: Request) {
     engagementById[id] = (engagementById[id] || 0) + eng
   }
 
-  const scored = ((data || []) as PicadaRankRow[]).map(row => {
+  // Agregamos filas de `picada_event_ranking` que mapean al mismo place
+  // canónico — sumando contadores y quedándonos con el mejor ranking_score.
+  type AggregatedRow = PicadaRankRow & { placeRow: PlaceRow | null }
+  const aggregated = new Map<string, AggregatedRow>()
+  for (const row of rawRows) {
+    const { canonicalId, placeRow } = resolveCanonical(row.picada_id)
+    const prev = aggregated.get(canonicalId)
+    if (prev) {
+      prev.community_votes = (prev.community_votes || 0) + (row.community_votes || 0)
+      prev.visits_count = (prev.visits_count || 0) + (row.visits_count || 0)
+      prev.reviews_count = (prev.reviews_count || 0) + (row.reviews_count || 0)
+      prev.ranking_score = Math.max(prev.ranking_score || 0, row.ranking_score || 0)
+    } else {
+      aggregated.set(canonicalId, {
+        ...row,
+        picada_id: canonicalId,
+        placeRow,
+      })
+    }
+  }
+
+  const scored = Array.from(aggregated.values()).map(row => {
     const meta = metaById[row.picada_id] || {}
+    const place = row.placeRow
     const qualityList = qualityById[row.picada_id] || []
     const qualityScore = qualityList.length > 0
       ? qualityList.reduce((acc, n) => acc + n, 0) / qualityList.length
@@ -132,10 +237,18 @@ export async function GET(req: Request) {
             : 'balance entre calidad, engagement y recencia'
 
     return {
-      ...row,
-      place_name: meta.place_name,
-      place_address: meta.place_address,
-      maps_url: meta.maps_url,
+      picada_id: row.picada_id,
+      community_votes: row.community_votes,
+      visits_count: row.visits_count,
+      reviews_count: row.reviews_count,
+      ranking_score: row.ranking_score,
+      place_name: place?.name || meta.place_name,
+      place_address: place?.address || meta.place_address,
+      maps_url: place?.maps_url || meta.maps_url,
+      photo_url: (() => {
+        const first = firstGalleryUrl(place?.gallery)
+        return first ? proxifyPhotoUrl(first) : null
+      })(),
       quality_score: Number(qualityScore.toFixed(2)),
       engagement_score: Number(engagementScore.toFixed(2)),
       recency_boost: Number(recencyBoost.toFixed(2)),

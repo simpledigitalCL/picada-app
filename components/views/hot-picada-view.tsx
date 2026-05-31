@@ -64,6 +64,7 @@ type RemotePicadaRank = {
   ranking_score: number
   place_name?: string
   place_address?: string
+  photo_url?: string | null
   maps_url?: string
   quality_score?: number
   engagement_score?: number
@@ -406,8 +407,16 @@ export function HotPicadaView({ locationQuery, onSelect, onLocationChange, onNew
 
   const top = useMemo(() => {
     const byId = new Map(items.map(item => [item.id, item]))
+    // Red de seguridad: si el server devuelve un picada_id que no matchea
+    // ningún item de discover (porque `places.external_id` está vacío o no
+    // existe la fila), todavía podemos colapsar por nombre+dirección
+    // normalizados antes de mostrar.
+    const normalizeKey = (name?: string, address?: string) =>
+      `${String(name || '').toLowerCase().trim()}|${String(address || '').toLowerCase().replace(/\s+/g, ' ').trim()}`
+    const byNameAddr = new Set(items.map(item => normalizeKey(item.name, item.address)))
     const remoteOnly: ExternalPlace[] = Object.values(remoteRankById)
       .filter(remote => !byId.has(remote.picada_id))
+      .filter(remote => !byNameAddr.has(normalizeKey(remote.place_name, remote.place_address)))
       .filter(remote =>
         placeTextMatchesLocation(remote.place_name, remote.place_address, locationQuery),
       )
@@ -418,6 +427,7 @@ export function HotPicadaView({ locationQuery, onSelect, onLocationChange, onNew
         rating: 0,
         reviews: remote.reviews_count || 0,
         openNow: true,
+        photoUrl: remote.photo_url || null,
         picadaReviews: remote.community_votes || 0,
         mapsUrl: remote.maps_url || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(remote.place_name || remote.picada_id)}`,
       }))
