@@ -139,7 +139,7 @@ The post form (`components/post-form.tsx`) is multi-step:
    - **review / incognito / media** → `POST /api/posts` → `persistUnifiedContent()` in `lib/server/content-persistence.ts` → inserts into `posts` + `post_media`.
    - **new-picada** → `POST /api/places/submit` → inserts a `pending` place with `provider='user_submission'`. Does NOT create a post.
 3. `/api/posts` overrides `body.user.id` with the authenticated user's real Supabase UUID.
-4. Media URL is stored in `posts.nutrition_data.original_payload.media.url` (JSONB) — `/api/social-feed` reads it from there, not a dedicated column.
+4. Media is **multi**: up to **3 photos OR 1 video** (no mixing — enforced in `useMediaUpload`). The form sends `mediaList: { url, kind }[]`; `content-persistence` inserts one `post_media` row per item with `sort_order`. The legacy single `media.url` (in `nutrition_data.original_payload`) is kept for back-compat. **`post_media` is the authoritative source** — `/api/social-feed` reads it (batched, ordered by `sort_order`) into `media: { url, kind }[]` and falls back to the legacy `nutrition_data` URL only for old posts with no `post_media` rows. Display uses `components/feed/media-carousel.tsx`.
 5. After success, `post-form.tsx` saves to `localStorage` (`picada.profile.social.v1.socialPosts`) and dispatches `picada:review-published` + `picada:post-published`.
 
 ### Nueva Picada flow
@@ -171,7 +171,9 @@ Three sequential gates block the app on first visit, all controlled by `app/page
 2. **Location gate** (`Dialog` with `onOpenChange={() => {}}`) — shown after onboarding if no location in localStorage. Cannot be closed without choosing a location. Bypassed when `picada.location.v1` is set in localStorage.
 3. **Auth required dialog** (`authRequiredOpen`) — opened by `picada:require-auth` DOM event (e.g., tapping "Iniciar sesión para participar" in the social feed). Contains `AuthQuickRegister`.
 
-`AuthQuickRegister` (`components/auth/auth-quick-register.tsx`) also lives in a second location: Social tab → sub-tab "Perfil" → ⚙️ settings → "Cuenta". The component handles sign-in, sign-up, and password reset against Supabase Auth.
+`AuthQuickRegister` (`components/auth/auth-quick-register.tsx`) also lives in a second location: Social tab → sub-tab "Perfil" → ⚙️ settings → "Cuenta". The component handles sign-in, sign-up, password reset, and **Google/Facebook OAuth** against Supabase Auth.
+
+OAuth is **web-only** (Vercel/PWA). It uses `signInWithOAuth({ provider, options: { redirectTo: window.location.origin } })` and returns to the SPA root `/`; the client's default `detectSessionInUrl` picks up the session, fires `SIGNED_IN`, and `app/page.tsx` closes the auth modal + calls `ensureProfileForSession` (creates the `profiles` row from Google `name`/`picture`). No callback route. For it to work, the origins must be allowlisted in Supabase → Auth → URL Configuration (Redirect URLs), and Google Cloud's authorized redirect URI must be `https://<project>.supabase.co/auth/v1/callback`. **Does not work inside the Capacitor WebView** — Google blocks OAuth in embedded WebViews; native needs a system-browser + deep-link flow (not implemented).
 
 After successful login, `app/page.tsx` `onAuthStateChange` handler sets `isAuthed = true` and closes `authRequiredOpen` automatically.
 
@@ -218,6 +220,10 @@ Tag classification pipeline: `lib/tags/venue-classification.ts` → `lib/tags/me
 `places.internal_rating` and `places.internal_rating_count` are maintained automatically by the Postgres trigger `trg_refresh_place_rating` on the `posts` table (migration `20260526_refresh_place_rating_trigger.sql`). It recalculates the average of non-incognito `type='review'` posts whenever a post is inserted, updated, or deleted. Never update these columns manually.
 
 `discoverFromPreloadedPlaces` exposes them as `picadaRating` / `picadaReviews` on `DiscoverItem`. The UI shows `picadaRating || rating` (community rating takes priority over Google rating when present).
+
+**Half-star ratings**: ratings support `.5` values (Letterboxd-style). The rating columns (`posts.rating`, `content_submissions.rating`, `menu_items.rating`) are `numeric(2,1)` — see migration `20260601_half_star_ratings.sql` (it auto-handles dependent views like `posts_feed` by dropping/recreating them with grants/options preserved). The shared interactive/read-only component is `components/ui/star-rating.tsx`: first tap on a star sets it full, second tap sets half; `allowClear` lets a third tap clear to 0. Use it everywhere instead of inline `<Star>` maps.
+
+**Discover cache & internal rating**: the discover route refreshes `picadaRating`/`picadaReviews` from the live DB (`preloaded`) onto inventory-cached items by id on every read (`discover/route.ts`, the `preloadedById` overlay). Without this, a stale `picadaReviews=0` from the 14-day inventory cache self-perpetuates (the inventory is rewritten from itself) and new reviews never surface on the map/discover. The daily snapshot is still served first, so a brand-new review can lag up to 26h in map/discover (the detail view's review *list* is always live via `/api/social-feed`).
 
 ### Place status and moderation
 
