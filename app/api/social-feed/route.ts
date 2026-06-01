@@ -34,16 +34,20 @@ export async function GET(req: Request) {
   if (!supabase) return NextResponse.json({ posts: [] })
 
   // Resolver place_ref → UUID interno (acepta UUID directo o external_id como ChIJ...)
+  // El cliente puede enviar el id con prefijo `ext-` (lo agregan hot-picada y
+  // map al construir el pseudo-Restaurant); lo stripeamos antes de buscar
+  // porque `places.external_id` guarda el id pelado.
   let resolvedPlaceId: string | null = null
   if (placeRef) {
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(placeRef)
+    const normalizedRef = placeRef.replace(/^ext-/, '')
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(normalizedRef)
     if (isUuid) {
-      resolvedPlaceId = placeRef
+      resolvedPlaceId = normalizedRef
     } else {
       const { data: row } = await supabase
         .from('places')
         .select('id')
-        .eq('external_id', placeRef)
+        .eq('external_id', normalizedRef)
         .maybeSingle()
       resolvedPlaceId = (row as { id?: string } | null)?.id ?? null
     }

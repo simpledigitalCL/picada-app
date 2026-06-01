@@ -6,6 +6,7 @@ import type { PlaceTaggingMeta } from '@/lib/tags/types'
 import { getServerGoogleMapsApiKey } from '@/lib/server/env'
 import { getSupabaseServerClient } from '@/lib/supabase-server'
 import { proxifyPhotoUrl } from '@/lib/utils/photo-url'
+import { persistPlacePhotos, needsMigration as photoNeedsMigration } from '@/lib/server/photo-storage'
 
 type GooglePlace = {
   place_id: string
@@ -893,6 +894,33 @@ function extractEditorialFromRaw(raw: Record<string, unknown> | undefined | null
   return null
 }
 
+function isStorageUrl(url: unknown): url is string {
+  return typeof url === 'string' && url.includes('/storage/v1/object/public/place-photos/')
+}
+
+// Fusiona la gallery nueva (URLs proxy desde Google) con la guardada en DB.
+// Las URLs ya migradas a Supabase Storage se conservan al principio (orden
+// estable para el podio/hero), y solo se agregan URLs nuevas que no estén ya
+// representadas — la idea es: una vez que una foto vive en Storage, una pasada
+// de discover no debería poder degradarla a proxy. `persistPlacePhotos`
+// (disparada después del upsert) sigue migrando las nuevas que se agreguen.
+function mergeGalleryPreservingStorage(existing: unknown[], incoming: string[]): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const url of existing) {
+    if (isStorageUrl(url) && !seen.has(url)) {
+      out.push(url)
+      seen.add(url)
+    }
+  }
+  for (const url of incoming) {
+    if (typeof url !== 'string' || !url || seen.has(url)) continue
+    out.push(url)
+    seen.add(url)
+  }
+  return out
+}
+
 async function writeDiscoveryCache(
   locationOrKey: string,
   source: string,
@@ -921,7 +949,7 @@ async function writeDiscoveryCache(
 
             const { data: existing } = await supabase
               .from('places')
-              .select('id, content_hash, raw_payload, tagging_meta, source_types, city, commune, region, phone, website, category')
+              .select('id, content_hash, raw_payload, tagging_meta, source_types, city, commune, region, phone, website, category, gallery')
               .in('provider', item.provider === 'google_places' ? ['google_places', 'google'] : ['openstreetmap', 'osm'])
               .eq('external_id', item.id)
               .maybeSingle()
@@ -977,7 +1005,10 @@ async function writeDiscoveryCache(
               experiences: classified.experiences,
               source_types: classified.source_types,
               tagging_meta: classified.tagging_meta,
-              gallery: item.gallery || [],
+              gallery: mergeGalleryPreservingStorage(
+                (existing?.gallery as unknown[] | null) ?? [],
+                item.gallery || [],
+              ),
               raw_payload: item.raw || {},
               content_hash: contentHash,
               last_synced_at: new Date().toISOString(),
@@ -997,6 +1028,15 @@ async function writeDiscoveryCache(
                 current_payload: item.raw || {},
                 changed_fields: ['content_hash_changed'],
               })
+            }
+
+            // Migración perezosa Google → Supabase Storage. Fire-and-forget para
+            // no bloquear el response (descarga + upload de N fotos puede tardar
+            // varios segundos). Si Vercel congela la función antes de terminar,
+            // el próximo discover del mismo lugar reintenta — los uploads usan
+            // `upsert: true` así que es idempotente.
+            if (upserted?.id && Array.isArray(item.gallery) && item.gallery.some(photoNeedsMigration)) {
+              persistPlacePhotos(upserted.id, item.id, item.gallery).then(undefined, () => undefined)
             }
 
             return upserted?.id as string | undefined

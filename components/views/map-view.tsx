@@ -79,6 +79,8 @@ export function MapView({ onSelect, active, locationQuery, onLocationChange }: M
   const userMarkerRef     = useRef<any>(null)
   const userPosRef        = useRef<{ lat: number; lng: number } | null>(null)
   const hasCenteredRef    = useRef(false)
+  const hasFitBoundsRef   = useRef(false)
+  const userInteractedRef = useRef(false)
   const hasPlacesRef      = useRef(false)
   const requestSeq        = useRef(0)
   const [selectedExternal, setSelectedExternal] = useState<ExternalPlace | null>(null)
@@ -116,6 +118,8 @@ export function MapView({ onSelect, active, locationQuery, onLocationChange }: M
   useEffect(() => {
     setExternalPlaces([])
     setMapCenter(null)
+    // Permitir un único re-encuadre automático para la nueva zona buscada.
+    hasFitBoundsRef.current = false
   }, [locationQuery])
 
   useEffect(() => {
@@ -183,8 +187,9 @@ export function MapView({ onSelect, active, locationQuery, onLocationChange }: M
       userMarkerRef.current = L.marker([userPos.lat, userPos.lng], { icon, zIndexOffset: 1000 }).addTo(map)
     }
 
-    // Primera vez que obtenemos posición real: centrar en el usuario a zoom 15
-    if (!hasCenteredRef.current) {
+    // Primera vez que obtenemos posición real: centrar en el usuario a zoom 15.
+    // Pero si el usuario ya empezó a navegar (GPS llegó tarde), no lo arrastramos.
+    if (!hasCenteredRef.current && !userInteractedRef.current) {
       hasCenteredRef.current = true
       map.setView([userPos.lat, userPos.lng], 15, { animate: true })
     }
@@ -330,6 +335,9 @@ export function MapView({ onSelect, active, locationQuery, onLocationChange }: M
       leafletRef.current = { L, map }
       setMapReady(true)
       map.on('click', () => setSelectedExternal(null))
+      // El arrastre es siempre intención del usuario: a partir de aquí no
+      // recentramos la cámara automáticamente (p. ej. si el GPS llega tarde).
+      map.on('dragstart', () => { userInteractedRef.current = true })
       map.on('moveend', () => {
         const c = map.getCenter()
         const zoom = map.getZoom()
@@ -500,12 +508,15 @@ export function MapView({ onSelect, active, locationQuery, onLocationChange }: M
       })
 
     // Si ya tenemos GPS del usuario, no hacer fitBounds (el usuario está centrado a zoom 15).
-    // Si no hay GPS, hacer fitBounds sobre los locales como fallback.
-    if (!userPosRef.current) {
+    // Si no hay GPS, encuadrar sobre los locales como fallback — pero SOLO una vez por
+    // zona. Sin este guard, cada paneo refresca discover → placesForMap → fitBounds,
+    // arrastrando la cámara y haciendo imposible navegar.
+    if (!userPosRef.current && !hasFitBoundsRef.current) {
       const points: Array<[number, number]> = placesForMap
         .filter(p => p.lat != null && p.lng != null)
         .map(p => [p.lat as number, p.lng as number] as [number, number])
       if (points.length === 0) return
+      hasFitBoundsRef.current = true
       const bounds = L.latLngBounds(points)
       map.fitBounds(bounds, { padding: [30, 30], maxZoom: 14 })
     }

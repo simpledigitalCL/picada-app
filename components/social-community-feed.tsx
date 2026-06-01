@@ -4,9 +4,10 @@ import Image from 'next/image'
 import { useEffect, useRef, useState } from 'react'
 import {
   ChevronLeft, ChevronRight, ExternalLink, Heart, MapPin,
-  MessageCircle, MoreHorizontal, RefreshCw, Share2, Star, X,
+  MessageCircle, MoreHorizontal, RefreshCw, Share2, X,
   UtensilsCrossed,
 } from 'lucide-react'
+import { StarRating } from '@/components/ui/star-rating'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
@@ -379,13 +380,16 @@ function PostCard({
         <button className="flex items-center gap-1 text-foreground" aria-label="Compartir">
           <Share2 className="size-4.5" />
         </button>
-        {rating && (
-          <div className="flex items-center gap-1 ml-auto">
-            {[1,2,3,4,5].map(n => (
-              <Star key={n} className={`size-3.5 ${n <= rating ? 'fill-yellow-400 text-yellow-400' : 'text-muted-foreground/30'}`} />
-            ))}
-          </div>
-        )}
+        {rating ? (
+          <StarRating
+            value={rating}
+            readOnly
+            size={14}
+            gap={2}
+            className="ml-auto"
+            fillClassName="fill-yellow-400 text-yellow-400"
+          />
+        ) : null}
         {/* Botón Ver local — siempre visible cuando hay place */}
         {placeName && onSelectPlace && (
           <button
