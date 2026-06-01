@@ -8,6 +8,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
+import { StarRating } from '@/components/ui/star-rating'
 
 export type ScanSuggestion = {
   nombre_estimado: string
@@ -122,8 +123,8 @@ export function ReviewEditor({
           <Textarea value={comment} onChange={e => setComment(e.target.value)} placeholder="¿Qué tal estaba? ¿Lo recomiendas?" />
         </div>
         <div className="space-y-1">
-          <p className="text-xs text-muted-foreground">Estrellas (1-5)</p>
-          <Input type="number" min={1} max={5} value={rating} onChange={e => setRating(Math.max(1, Math.min(5, Number(e.target.value) || 1)))} />
+          <p className="text-xs text-muted-foreground">Estrellas (toca de nuevo para media)</p>
+          <StarRating value={rating} onChange={setRating} size={28} gap={4} />
         </div>
 
         <Button

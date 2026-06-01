@@ -1,9 +1,9 @@
 'use client'
 
-import { Star } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { StarRating } from '@/components/ui/star-rating'
 import { PostDetailsForm } from '@/components/post-form/PostDetailsForm'
 
 const MOODS = [
@@ -16,6 +16,9 @@ const MOODS = [
 ]
 
 const STAR_LABELS = ['', 'Malo', 'Regular', 'Bueno', 'Muy bueno', 'Excelente']
+
+const formatRating = (value: number) =>
+  value % 1 === 0 ? String(value) : value.toFixed(1).replace('.', ',')
 
 type Props = {
   type?: 'review' | 'incognito' | 'new-picada'
@@ -66,31 +69,22 @@ export function ReviewDetailsStep({
           </p>
           {rating > 0 && (
             <Badge className="bg-orange-500/20 text-orange-100 border-orange-300/40 hover:bg-orange-500/20">
-              {STAR_LABELS[rating]}
+              {formatRating(rating)} · {STAR_LABELS[Math.ceil(rating)]}
             </Badge>
           )}
         </div>
-        <div className="flex gap-1.5">
-          {[1, 2, 3, 4, 5].map(n => (
-            <Button
-              key={n}
-              type="button"
-              variant="ghost"
-              onClick={() => onRatingChange(rating === n && isPicada ? 0 : n)}
-              className="group h-auto w-auto p-0 transition-all active:scale-90 hover:bg-transparent"
-              aria-label={`${n} estrellas`}
-            >
-              <Star
-                className={cn(
-                  'size-8 transition-colors',
-                  n <= rating
-                    ? 'fill-amber-400 text-amber-500 drop-shadow-[0_0_6px_rgba(251,191,36,0.45)]'
-                    : 'text-border group-hover:text-amber-300',
-                )}
-              />
-            </Button>
-          ))}
-        </div>
+        <StarRating
+          value={rating}
+          onChange={onRatingChange}
+          allowClear={isPicada}
+          size={32}
+          gap={6}
+          fillClassName="fill-amber-400 text-amber-500 drop-shadow-[0_0_6px_rgba(251,191,36,0.45)]"
+          emptyClassName="text-border"
+        />
+        <p className="text-[10px] text-orange-100/60">
+          Toca una estrella; tócala de nuevo para media estrella.
+        </p>
       </div>
 
       {/* ── Comentario ── */}

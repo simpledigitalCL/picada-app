@@ -243,7 +243,7 @@ CREATE TABLE IF NOT EXISTS public.content_submissions (
   media_kind    text CHECK (media_kind IN ('photo', 'video')),
   has_comment   boolean NOT NULL DEFAULT false,
   comment_length int NOT NULL DEFAULT 0,
-  rating        int CHECK (rating BETWEEN 1 AND 5),
+  rating        numeric(2,1) CHECK (rating BETWEEN 1 AND 5),
 
   place_id      text,
   place_name    text,

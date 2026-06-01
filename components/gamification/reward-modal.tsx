@@ -220,7 +220,7 @@ export function RewardModal() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[400] flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center"
+          className="fixed inset-0 z-[400] flex items-end justify-center bg-black/70 backdrop-blur-sm pointer-events-auto sm:items-center"
           onClick={e => { if (e.target === e.currentTarget) closeModal() }}
         >
           <motion.div

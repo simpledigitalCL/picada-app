@@ -4,6 +4,7 @@ import Image from 'next/image'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Star, MapPin, Clock, X, Camera, Flame, Trophy, Plus, Share2, Phone, MessageCircle, Navigation, Instagram, Music2, Sparkles, Heart, Play, Video, Edit3, Check, ThumbsDown } from 'lucide-react'
+import { StarRating } from '@/components/ui/star-rating'
 import { type Restaurant, CATEGORY_META, priceLabel } from '@/lib/places/restaurants'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -240,11 +241,14 @@ function CommunityPostCard({ post, placeName }: { post: CommunityPost; placeName
           <Share2 className="size-4.5" />
         </button>
         {post.rating ? (
-          <div className="ml-auto flex items-center gap-0.5">
-            {[1,2,3,4,5].map(n => (
-              <Star key={n} className={`size-3.5 ${n <= (post.rating ?? 0) ? 'fill-yellow-400 text-yellow-400' : 'text-muted-foreground/30'}`} />
-            ))}
-          </div>
+          <StarRating
+            value={post.rating}
+            readOnly
+            size={14}
+            gap={2}
+            className="ml-auto"
+            fillClassName="fill-yellow-400 text-yellow-400"
+          />
         ) : null}
       </div>
 
@@ -546,9 +550,8 @@ export function RestaurantDetail({ restaurant: r, onClose, onAddReview, onAddPho
     comida: ['Picada', 'Premium', 'Café', 'Sushi', 'Parrilla', 'Vegano', 'Vegetariano', 'Keto', 'Sin lactosa', 'Sin gluten'],
   } as const
 
-  const handleQuickRate = (stars: number) => {
-    if (quickRated) return
-    setQuickRating(stars)
+  const handleQuickConfirm = () => {
+    if (quickRated || quickRating <= 0) return
     setQuickRated(true)
     onClose()
     openUnifiedPostForm({
@@ -562,7 +565,7 @@ export function RestaurantDetail({ restaurant: r, onClose, onAddReview, onAddPho
         photoUrl: r.imageUrl,
         coverageSparse: r.coverageSparse,
       },
-      review: { rating: stars, comment: '' },
+      review: { rating: quickRating, comment: '' },
       taxonomy: { category: 'experiencia', tags: ['quick_rating'], moods: [] },
     })
   }
@@ -886,15 +889,27 @@ export function RestaurantDetail({ restaurant: r, onClose, onAddReview, onAddPho
           {!quickRated ? (
             <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-3 py-2.5 space-y-1.5">
               <div className="flex items-center justify-between">
-                <p className="text-xs font-semibold text-amber-900">¿Cómo lo calificas? Toca una estrella</p>
+                <p className="text-xs font-semibold text-amber-900">¿Cómo lo calificas? Toca de nuevo para media estrella</p>
                 <XpChip value={XP_RULES.quickReview} subtle />
               </div>
-              <div className="flex items-center gap-1" role="group" aria-label="Calificación rápida">
-                {[1, 2, 3, 4, 5].map(n => (
-                  <button key={n} onClick={() => handleQuickRate(n)} aria-label={`${n} estrellas`} className="transition-transform active:scale-90">
-                    <Star className={`size-7 transition-colors ${n <= quickRating ? 'fill-yellow-400 text-yellow-400' : 'text-muted-foreground/30'}`} />
+              <div className="flex items-center justify-between gap-2">
+                <StarRating
+                  value={quickRating}
+                  onChange={setQuickRating}
+                  allowClear
+                  size={28}
+                  gap={4}
+                  fillClassName="fill-yellow-400 text-yellow-400"
+                  ariaLabel="Calificación rápida"
+                />
+                {quickRating > 0 && (
+                  <button
+                    onClick={handleQuickConfirm}
+                    className="rounded-full bg-amber-500 px-3 py-1.5 text-xs font-bold text-white active:scale-95 transition-transform"
+                  >
+                    Confirmar {quickRating % 1 === 0 ? quickRating : quickRating.toFixed(1).replace('.', ',')}
                   </button>
-                ))}
+                )}
               </div>
             </div>
           ) : (
@@ -979,11 +994,13 @@ export function RestaurantDetail({ restaurant: r, onClose, onAddReview, onAddPho
                           {review.author ? `${review.author === 'Google Maps' ? '' : '@'}${sanitizeUserText(review.author)}` : 'Usuario'}
                         </p>
                         {review.rating ? (
-                          <div className="flex items-center gap-0.5">
-                            {[1, 2, 3, 4, 5].map(n => (
-                              <Star key={n} className={`size-3 ${n <= review.rating! ? 'fill-yellow-400 text-yellow-400' : 'text-muted-foreground/30'}`} />
-                            ))}
-                          </div>
+                          <StarRating
+                            value={review.rating}
+                            readOnly
+                            size={12}
+                            gap={2}
+                            fillClassName="fill-yellow-400 text-yellow-400"
+                          />
                         ) : null}
                       </div>
                       {sanitizeUserText(review.text).trim() && <ExpandableText text={sanitizeUserText(review.text)} />}
