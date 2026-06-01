@@ -13,6 +13,7 @@ const CATEGORIES: { value: string; label: string }[] = [
   { value: 'bar',            label: '🍺 Bar'                },
   { value: 'fast_food',      label: '🍔 Comida rápida'      },
   { value: 'bakery',         label: '🥐 Panadería'          },
+  { value: 'heladeria',      label: '🍦 Heladería'          },
   { value: 'other',          label: '📍 Otro'               },
 ]
 

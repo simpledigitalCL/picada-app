@@ -1,6 +1,5 @@
 'use client'
 
-import Image from 'next/image'
 import { useEffect, useRef, useState } from 'react'
 import {
   ChevronLeft, ChevronRight, ExternalLink, Heart, MapPin,
@@ -17,8 +16,8 @@ import { isAuthenticatedClient, requireAuthOrPrompt } from '@/lib/auth/gate'
 import type { Restaurant } from '@/lib/places/restaurants'
 import { slugDisplayFromAutomatedSlug } from '@/lib/tags/display'
 import { sanitizeUserText } from '@/lib/utils/sanitize'
-import { proxyVideoUrl, videoMimeFromUrl } from '@/lib/utils'
 import { getSupabaseBrowserClient } from '@/lib/supabase'
+import { MediaCarousel } from '@/components/feed/media-carousel'
 
 // ─── Local post type (from localStorage) ──────────────────────────────────────
 
@@ -224,6 +223,11 @@ function PostCard({
   const postUsername = sanitizeUserText(isLocal ? username : (post as SocialPost).username)
   const safePlaceName = sanitizeUserText(placeName || '')
   const isVideo = postType === 'video' || (mediaUrl?.startsWith('data:video') ?? false)
+  const mediaList: { url: string; kind: 'photo' | 'video' }[] = isLocal
+    ? (mediaUrl ? [{ url: mediaUrl, kind: isVideo ? 'video' : 'photo' }] : [])
+    : ((post as SocialPost).media && (post as SocialPost).media.length > 0
+        ? (post as SocialPost).media
+        : (mediaUrl ? [{ url: mediaUrl, kind: isVideo ? 'video' : 'photo' }] : []))
 
   const timeAgo = (iso: string) => {
     const diff = Date.now() - new Date(iso).getTime()
@@ -314,38 +318,15 @@ function PostCard({
       </div>
 
       {/* Media o placeholder de local */}
-      {mediaUrl ? (
-        <div className="relative bg-muted overflow-hidden">
-          {isVideo ? (
-            <div className="relative aspect-video bg-black">
-              <video
-                className="w-full h-full object-cover"
-                controls
-                playsInline
-                preload="metadata"
-              >
-                {/* Proxy same-origin para evitar bloqueos de Firefox ETP/CORS */}
-                <source src={proxyVideoUrl(mediaUrl) ?? undefined} type={videoMimeFromUrl(mediaUrl)} />
-                <source src={mediaUrl} type={videoMimeFromUrl(mediaUrl)} />
-                <p className="flex items-center justify-center text-xs text-white/70 p-4 text-center">
-                  Tu navegador no puede reproducir este video.
-                </p>
-              </video>
-            </div>
-          ) : mediaUrl.startsWith('data:') ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={mediaUrl} alt="" className="w-full max-h-80 object-cover" />
-          ) : (
-            <div className="relative aspect-square">
-              <Image src={mediaUrl} alt="" fill className="object-cover" />
-            </div>
-          )}
-          {placeName && !isVideo && (
+      {mediaList.length > 0 ? (
+        <MediaCarousel
+          media={mediaList}
+          overlay={placeName && !isVideo ? (
             <div className="absolute bottom-2 left-2 bg-black/60 text-white text-[11px] px-2 py-1 rounded-full flex items-center gap-1 max-w-[70%] truncate">
               <MapPin className="size-3 shrink-0" />{safePlaceName}
             </div>
-          )}
-        </div>
+          ) : undefined}
+        />
       ) : placeName && postType === 'review' ? (
         /* Reseña sin foto: mostrar banner del local */
         <button

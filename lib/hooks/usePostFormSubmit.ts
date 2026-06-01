@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { getAuthHeaders } from '@/lib/api/auth'
 import { getOrCreateIdentity } from '@/lib/auth/identity'
-import type { UnifiedContentPayload } from '@/lib/content/model'
+import type { MediaItem, UnifiedContentPayload } from '@/lib/content/model'
 import { validatePostDetailsInput } from '@/lib/validation/post-form-schema'
 
 type SubmitInput = {
@@ -16,6 +16,7 @@ type SubmitInput = {
   moods: string[]
   mediaUrl: string | null
   mediaKind: 'photo' | 'video' | null
+  mediaItems?: MediaItem[]
   picadaLat?: number | null
   picadaLng?: number | null
   picadaAddress?: string | null
@@ -112,10 +113,15 @@ export function usePostFormSubmit() {
     }
 
     const identity = getOrCreateIdentity()
-    const safeMediaUrl =
-      typeof input.mediaUrl === 'string' && input.mediaUrl.trim() && !input.mediaUrl.startsWith('data:')
-        ? input.mediaUrl.trim()
-        : null
+    // Lista de media válida (URLs http ya subidas). Cae al single legacy si no viene lista.
+    const safeMediaList: MediaItem[] = (
+      input.mediaItems && input.mediaItems.length > 0
+        ? input.mediaItems
+        : input.mediaUrl && input.mediaKind
+          ? [{ url: input.mediaUrl, kind: input.mediaKind }]
+          : []
+    ).filter(m => typeof m.url === 'string' && m.url.trim() && !m.url.startsWith('data:'))
+    const safeMediaUrl = safeMediaList[0]?.url ?? null
 
     const payload: UnifiedContentPayload = {
       entry: input.type,
@@ -125,7 +131,8 @@ export function usePostFormSubmit() {
         name: input.selectedPlace?.name || null,
         address: input.selectedPlace?.address || null,
       },
-      media: { url: safeMediaUrl, kind: input.mediaKind },
+      media: { url: safeMediaUrl, kind: safeMediaList[0]?.kind ?? input.mediaKind },
+      mediaList: safeMediaList,
       review: {
         comment: input.comment || null,
         rating: normalizedRating || null,

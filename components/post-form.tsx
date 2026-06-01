@@ -155,7 +155,11 @@ export function PostForm({ type, locationQuery, contextRestaurant, draft, onClos
       'review'
     ) as 'review' | 'incognito' | 'media' | 'new-picada'
 
-    const mediaUrl = media.uploadedUrl ||
+    // Lista completa de media subida (hasta 3 fotos o 1 video).
+    const mediaItems = media.items
+      .filter(it => it.url && /^https?:\/\//i.test(it.url))
+      .map(it => ({ url: it.url as string, kind: it.kind }))
+    const mediaUrl = mediaItems[0]?.url ||
       (media.preview && /^https?:\/\//i.test(media.preview) ? media.preview : null)
 
     const selected = flow.formAccumulator.selectedPlace
@@ -192,6 +196,7 @@ export function PostForm({ type, locationQuery, contextRestaurant, draft, onClos
         moods:            flow.formAccumulator.moods,
         mediaUrl,
         mediaKind:        media.previewKind,
+        mediaItems,
         picadaLat:        flow.formAccumulator.picadaLat,
         picadaLng:        flow.formAccumulator.picadaLng,
         picadaAddress:    flow.formAccumulator.picadaAddress,
@@ -321,11 +326,12 @@ export function PostForm({ type, locationQuery, contextRestaurant, draft, onClos
       return (
         <MediaStep
           fileRef={media.fileRef}
-          preview={media.preview}
+          items={media.items}
+          canAddMore={media.canAddMore}
           comment={flow.formAccumulator.comment}
           onPick={() => media.fileRef.current?.click()}
           onFileChange={media.handleFileChange}
-          onRemove={() => media.setPreview(null)}
+          onRemove={media.removeItem}
           onCommentChange={v => flow.patchAccumulator({ comment: v })}
         />
       )

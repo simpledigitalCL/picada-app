@@ -590,8 +590,9 @@ export function MapView({ onSelect, active, locationQuery, onLocationChange }: M
                 comuna: locationQuery || 'Zona',
                 lat: selectedExternal.lat || -33.45,
                 lng: selectedExternal.lng || -70.66,
-                rating: selectedExternal.rating || 4.2,
-                reviewCount: selectedExternal.reviews || 0,
+                // Prioriza rating interno de la comunidad (picada) sobre el de Google.
+                rating: selectedExternal.picadaRating ?? selectedExternal.rating ?? 0,
+                reviewCount: selectedExternal.picadaReviews || selectedExternal.reviews || 0,
                 distance: 'cerca',
                 priceRange: 2,
                 tags:

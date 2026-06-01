@@ -1,50 +1,91 @@
 'use client'
 
-import { Button } from '@/components/ui/button'
+import { Plus, X, Video } from 'lucide-react'
+import type { MediaUploadItem } from '@/lib/hooks/useMediaUpload'
 
 type Props = {
-  preview: string | null
+  items: MediaUploadItem[]
+  canAddMore: boolean
   onPick: () => void
-  onRemove?: () => void
+  onRemove: (id: string) => void
   mode?: 'compact' | 'full'
 }
 
-export function MediaGallery({ preview, onPick, onRemove, mode = 'compact' }: Props) {
-  if (mode === 'compact') {
+export function MediaGallery({ items, canAddMore, onPick, onRemove, mode = 'compact' }: Props) {
+  const empty = items.length === 0
+
+  if (empty && mode === 'full') {
     return (
-      <div className="space-y-2">
-        <Button type="button" variant="outline" className="w-full justify-start" onClick={onPick}>
-          Agregar foto/video
-        </Button>
-        {preview ? (
-          <div className="flex items-center gap-3">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={preview} alt="preview" className="size-20 rounded-lg object-cover border" />
-            {onRemove ? (
-              <button type="button" className="text-xs text-muted-foreground underline" onClick={onRemove}>
-                Quitar
-              </button>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
+      <button
+        type="button"
+        onClick={onPick}
+        className="w-full h-44 rounded-2xl border-2 border-dashed border-violet-200 bg-violet-50/50 flex flex-col items-center justify-center gap-1 text-xs text-violet-600"
+      >
+        <Plus className="size-5" />
+        Toca para subir hasta 3 fotos o 1 video
+      </button>
     )
   }
 
   return (
     <div className="space-y-2">
-      {preview ? (
-        <div className="relative rounded-2xl overflow-hidden border">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={preview} alt="Preview" className="w-full max-h-52 object-cover" />
-        </div>
-      ) : (
+      {empty ? (
         <button
+          type="button"
           onClick={onPick}
-          className="w-full h-44 rounded-2xl border-2 border-dashed border-violet-200 bg-violet-50/50 flex items-center justify-center text-xs text-violet-600"
+          className="w-full rounded-xl border border-dashed border-muted-foreground/40 py-3 text-xs text-muted-foreground hover:bg-muted/40"
         >
-          Toca para subir foto o video
+          + Agregar fotos o video
         </button>
+      ) : (
+        <div className="grid grid-cols-3 gap-2">
+          {items.map(item => (
+            <div key={item.id} className="relative aspect-square rounded-xl overflow-hidden border bg-muted">
+              {item.kind === 'video' ? (
+                <>
+                  <video src={item.preview} className="h-full w-full object-cover" muted playsInline />
+                  <span className="absolute bottom-1 left-1 rounded-full bg-black/60 p-1 text-white">
+                    <Video className="size-3" />
+                  </span>
+                </>
+              ) : (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={item.preview} alt="" className="h-full w-full object-cover" />
+              )}
+
+              {item.uploading && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+                  <span className="size-5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                </div>
+              )}
+              {item.error && (
+                <div className="absolute inset-0 flex items-center justify-center bg-red-900/50 p-1 text-center text-[9px] text-white">
+                  Error
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={() => onRemove(item.id)}
+                className="absolute right-1 top-1 flex size-5 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80"
+                aria-label="Quitar"
+              >
+                <X className="size-3" />
+              </button>
+            </div>
+          ))}
+
+          {canAddMore && (
+            <button
+              type="button"
+              onClick={onPick}
+              className="aspect-square rounded-xl border-2 border-dashed border-muted-foreground/30 flex flex-col items-center justify-center gap-1 text-[10px] text-muted-foreground hover:bg-muted/40"
+            >
+              <Plus className="size-5" />
+              Agregar
+            </button>
+          )}
+        </div>
       )}
     </div>
   )
