@@ -12,6 +12,8 @@ export type SocialPost = {
   type: 'review' | 'photo' | 'video' | 'incognito' | 'tip'
   mood_tags: string[]
   media_url: string | null
+  /** Todas las fotos/video del post, ordenadas. `media_url` = primero (retrocompat). */
+  media: { url: string; kind: 'photo' | 'video' }[]
   created_at: string
   quality_score?: number
   tags?: string[]
@@ -88,16 +90,29 @@ export async function GET(req: Request) {
 
   const postIds = (data || []).map(r => r.id).filter(Boolean)
 
-  // Batch-fetch usernames and like counts in parallel
+  // Batch-fetch usernames, like counts and media in parallel
   const userIds = [...new Set((data || []).map(r => r.user_id).filter(Boolean))]
-  const [profilesRes, likesRes] = await Promise.all([
+  const [profilesRes, likesRes, mediaRes] = await Promise.all([
     userIds.length > 0
       ? supabase.from('profiles').select('id, username').in('id', userIds)
       : Promise.resolve({ data: [] }),
     postIds.length > 0
       ? supabase.from('post_likes').select('post_id').in('post_id', postIds)
       : Promise.resolve({ data: [] }),
+    postIds.length > 0
+      ? supabase.from('post_media').select('post_id, url, media_type, sort_order').in('post_id', postIds).order('sort_order', { ascending: true })
+      : Promise.resolve({ data: [] }),
   ])
+
+  // Agrupar media por post (ordenada por sort_order).
+  const mediaByPost = new Map<string, { url: string; kind: 'photo' | 'video' }[]>()
+  for (const row of (mediaRes.data || []) as Array<{ post_id: string; url: string; media_type: string }>) {
+    const url = String(row.url || '').trim()
+    if (!url || url.startsWith('data:')) continue
+    const arr = mediaByPost.get(row.post_id) || []
+    arr.push({ url, kind: row.media_type === 'video' ? 'video' : 'photo' })
+    mediaByPost.set(row.post_id, arr)
+  }
 
   const profileByUserId = new Map<string, string>()
   for (const p of (profilesRes.data || []) as Array<{ id: string; username: string }>) {
@@ -122,9 +137,15 @@ export async function GET(req: Request) {
       String(user.username || '').trim() ||
       `foodie_${String(row.id).slice(0, 4)}`
 
-    let mediaUrl: string | null = null
-    const rawUrl = String(media.url || '')
-    if (rawUrl && !rawUrl.startsWith('data:')) mediaUrl = rawUrl
+    // Fuente autoritativa: post_media. Fallback al single legacy de nutrition_data.
+    let mediaArr = mediaByPost.get(row.id) || []
+    if (mediaArr.length === 0) {
+      const rawUrl = String(media.url || '')
+      if (rawUrl && !rawUrl.startsWith('data:')) {
+        mediaArr = [{ url: rawUrl, kind: row.type === 'video' ? 'video' : 'photo' }]
+      }
+    }
+    const mediaUrl: string | null = mediaArr[0]?.url ?? null
 
     return {
       id: row.id,
@@ -136,6 +157,7 @@ export async function GET(req: Request) {
       type: row.type,
       mood_tags: Array.isArray(row.mood_tags) ? row.mood_tags : [],
       media_url: mediaUrl,
+      media: mediaArr,
       created_at: row.created_at,
       quality_score: Number(nd.quality_score || 0),
       tags: Array.isArray(nd.normalized_tags) ? (nd.normalized_tags as string[]) : [],

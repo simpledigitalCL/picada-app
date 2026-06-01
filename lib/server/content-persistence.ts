@@ -170,8 +170,16 @@ export async function persistUnifiedContent(supabase: SupabaseClient, body: Unif
   const comment = sanitizeUserText(body.review?.comment || '').trim()
   const placeAddressSanitized = sanitizeUserText(body.place?.address || '').trim()
   const rating = Number(body.review?.rating || 0) || null
-  const mediaUrl = body.media?.url || null
-  const mediaKind = body.media?.kind || null
+  // Media: hasta 3 fotos o 1 video. Acepta `mediaList` nuevo o `media` single legacy.
+  const rawMediaList = Array.isArray(body.mediaList) && body.mediaList.length > 0
+    ? body.mediaList
+    : (body.media?.url ? [{ url: body.media.url, kind: body.media.kind || 'photo' }] : [])
+  const mediaList = rawMediaList
+    .filter(m => typeof m?.url === 'string' && m.url.trim() && !m.url.startsWith('data:'))
+    .slice(0, 3)
+    .map(m => ({ url: (m.url as string).trim(), kind: (m.kind === 'video' ? 'video' : 'photo') as 'photo' | 'video' }))
+  const mediaUrl = mediaList[0]?.url || null
+  const mediaKind = mediaList[0]?.kind || null
   const isIncognito = Boolean(body.review?.isIncognito)
   const contentType = normalizeCategory(
     mediaKind === 'video' ? 'video' : mediaUrl ? 'photo' : isIncognito ? 'incognito' : 'review',
@@ -224,14 +232,15 @@ export async function persistUnifiedContent(supabase: SupabaseClient, body: Unif
 
   const postId = String((insertedPost as { id?: string } | null)?.id || '')
 
-  // Insertar media en post_media (bloqueante — es parte del post)
-  if (mediaUrl && mediaKind && postId) {
-    const { error: mediaError } = await supabase.from('post_media').insert({
+  // Insertar media en post_media (bloqueante — es parte del post). Hasta 3 fotos o 1 video.
+  if (mediaList.length > 0 && postId) {
+    const rows = mediaList.map((m, i) => ({
       post_id: postId,
-      url: mediaUrl,
-      media_type: mediaKind,
-      sort_order: 0,
-    })
+      url: m.url,
+      media_type: m.kind,
+      sort_order: i,
+    }))
+    const { error: mediaError } = await supabase.from('post_media').insert(rows)
     if (mediaError) {
       return { ok: false as const, status: 500, error: mediaError.message || 'post_media_insert_failed' }
     }

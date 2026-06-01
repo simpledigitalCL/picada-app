@@ -1,15 +1,15 @@
 'use client'
 
-import Image from 'next/image'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Star, MapPin, Clock, X, Camera, Flame, Trophy, Plus, Share2, Phone, MessageCircle, Navigation, Instagram, Music2, Sparkles, Heart, Play, Video, Edit3, Check, ThumbsDown } from 'lucide-react'
 import { StarRating } from '@/components/ui/star-rating'
+import { MediaCarousel } from '@/components/feed/media-carousel'
 import { type Restaurant, CATEGORY_META, priceLabel } from '@/lib/places/restaurants'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { cn, proxyVideoUrl } from '@/lib/utils'
+import { cn } from '@/lib/utils'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { MatchScore } from '@/components/restaurant/match-score'
 import { loadPreferences } from '@/lib/feed/personalization'
@@ -38,6 +38,7 @@ type CommunityPost = {
   rating?: number | null
   type: 'review' | 'photo' | 'video'
   mediaUrl?: string | null
+  media?: { url: string; kind: 'photo' | 'video' }[]
   tags?: string[]
   moods?: string[]
   createdAt: string
@@ -60,6 +61,9 @@ function mapSocialPostToCommunity(p: SocialPost): CommunityPost {
     rating: p.rating,
     type: isVideo ? 'video' : p.media_url ? 'photo' : 'review',
     mediaUrl: p.media_url,
+    media: p.media && p.media.length > 0
+      ? p.media
+      : (p.media_url ? [{ url: p.media_url, kind: isVideo ? 'video' : 'photo' }] : []),
     tags: Array.isArray(p.tags) ? p.tags.map(String) : [],
     moods: Array.isArray(p.mood_tags) ? p.mood_tags.map(String) : [],
     createdAt: p.created_at,
@@ -99,6 +103,9 @@ function loadLocalCommunityPosts(placeName: string, fallbackUsername: string): C
             ? 'photo'
             : 'review',
         mediaUrl: sp.imageDataUrl || null,
+        media: sp.imageDataUrl
+          ? [{ url: sp.imageDataUrl, kind: sp.imageDataUrl.startsWith('data:video') ? 'video' : 'photo' }]
+          : [],
         tags: Array.isArray(sp.tags) ? sp.tags.map(String) : [],
         moods: Array.isArray(sp.moods) ? sp.moods.map(String) : [],
         createdAt: sp.createdAt,
@@ -135,6 +142,11 @@ function CommunityPostCard({ post, placeName }: { post: CommunityPost; placeName
   const [likeCount, setLikeCount] = useState(() => getLikeCount(post.id))
   const [following, setFollowing] = useState(() => isFollowing(post.username))
   const isVideo = post.type === 'video' || (post.mediaUrl?.startsWith('data:video') ?? false)
+  const postMedia = post.media && post.media.length > 0
+    ? post.media
+    : (post.mediaUrl && post.mediaUrl.trim()
+        ? [{ url: post.mediaUrl.trim(), kind: (isVideo ? 'video' : 'photo') as 'photo' | 'video' }]
+        : [])
   const displayName = post.anonymous ? 'Usuario anónimo' : `@${sanitizeUserText(post.username)}`
   const safePostContent = sanitizeUserText(post.content || '')
   const safePlaceName = sanitizeUserText(placeName)
@@ -194,28 +206,7 @@ function CommunityPostCard({ post, placeName }: { post: CommunityPost; placeName
       </div>
 
       {/* Media */}
-      {post.mediaUrl && String(post.mediaUrl).trim() ? (
-        <div className="relative bg-black">
-          {isVideo ? (
-            <div className="relative aspect-video">
-              <video
-                src={proxyVideoUrl(String(post.mediaUrl).trim()) ?? String(post.mediaUrl).trim()}
-                controls
-                playsInline
-                preload="metadata"
-                className="w-full h-full object-contain"
-              />
-            </div>
-          ) : String(post.mediaUrl).startsWith('data:') ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={String(post.mediaUrl).trim()} alt="" className="w-full max-h-72 object-cover" />
-          ) : (
-            <div className="relative aspect-video">
-              <Image src={String(post.mediaUrl).trim()} alt="" fill className="object-cover" sizes="100vw" />
-            </div>
-          )}
-        </div>
-      ) : null}
+      {postMedia.length > 0 ? <MediaCarousel media={postMedia} /> : null}
 
       {/* Actions */}
       <div className="px-3 pt-2.5 pb-1 flex items-center gap-3">
@@ -464,7 +455,9 @@ export function RestaurantDetail({ restaurant: r, onClose, onAddReview, onAddPho
     }
     // Prioridad: comunidad > fotos de Google/cache.
     communityPosts.forEach(p => {
-      if (p.type !== 'video') add(p.mediaUrl)
+      if (p.type === 'video') return
+      if (p.media && p.media.length > 0) p.media.forEach(m => { if (m.kind !== 'video') add(m.url) })
+      else add(p.mediaUrl)
     })
     communityPhotos.forEach(add)
     ;(r.gallery || []).forEach(add)
@@ -489,6 +482,24 @@ export function RestaurantDetail({ restaurant: r, onClose, onAddReview, onAddPho
 
   const reelPosts = useMemo(() => communityPosts.filter(p => p.type === 'video'), [communityPosts])
   const photoFeedPosts = useMemo(() => communityPosts.filter(p => p.type !== 'video'), [communityPosts])
+  // Todas las fotos del local: reseñas/posts de usuarios > aportes (menu_items) > Google/cache.
+  const allPhotos = useMemo(() => {
+    const urls: string[] = []
+    const add = (u?: string | null) => {
+      const s = typeof u === 'string' ? u.trim() : ''
+      if (!s || urls.includes(s) || s.startsWith('data:video')) return
+      urls.push(s)
+    }
+    communityPosts.forEach(p => {
+      if (p.type === 'video') return
+      if (p.media && p.media.length > 0) p.media.forEach(m => { if (m.kind !== 'video') add(m.url) })
+      else add(p.mediaUrl)
+    })
+    communityPhotos.forEach(add)
+    ;(r.gallery || []).forEach(add)
+    add(r.imageUrl)
+    return urls
+  }, [communityPosts, communityPhotos, r.gallery, r.imageUrl])
   const googleFallbackReviews = useMemo<
     Array<{ text: string; rating?: number; photoUrl?: string | null; author?: string; createdAt?: string; tags?: string[] }>
   >(
@@ -701,8 +712,14 @@ export function RestaurantDetail({ restaurant: r, onClose, onAddReview, onAddPho
             <div className="flex items-center gap-3 mt-1 text-white/80 text-sm">
               <span className="flex items-center gap-1">
                 <Star className="size-3.5 fill-yellow-400 stroke-none" />
-                <span className="font-bold text-white">{r.rating}</span>
-                <span>({r.reviewCount} reseñas)</span>
+                {r.rating > 0 ? (
+                  <>
+                    <span className="font-bold text-white">{r.rating.toFixed(1)}</span>
+                    <span>({r.reviewCount} {r.reviewCount === 1 ? 'reseña' : 'reseñas'})</span>
+                  </>
+                ) : (
+                  <span>Sin reseñas aún</span>
+                )}
               </span>
             </div>
             <div className="flex items-center gap-1.5 mt-2 overflow-x-auto scrollbar-none">
@@ -1042,27 +1059,25 @@ export function RestaurantDetail({ restaurant: r, onClose, onAddReview, onAddPho
                   <XpChip value={Math.round(XP_RULES.photoPlusReview * (r.coverageSparse ? 2 : 1))} className="ml-1" />
                 </Button>
               </div>
-              <div className="grid grid-cols-2 gap-2">
-                {Array.from(
-                  new Set(
-                    [...(r.gallery || []), r.imageUrl, ...communityPhotos]
-                      .map(p => (typeof p === 'string' ? p.trim() : ''))
-                      .filter(p => p.length > 0),
-                  ),
-                )
-                  .slice(0, 12)
-                  .map((photo, idx) => (
-                  <button
-                    key={`${photo}-${idx}`}
-                    type="button"
-                    className="rounded-xl overflow-hidden bg-muted border aspect-square"
-                    onClick={() => setPhotoPreview(photo)}
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={photo} alt={`foto-${idx}`} className="h-full w-full object-cover" />
-                  </button>
-                ))}
-              </div>
+              {allPhotos.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-6">
+                  Aún no hay fotos. ¡Sé el primero en aportar una!
+                </p>
+              ) : (
+                <div className="grid grid-cols-2 gap-2">
+                  {allPhotos.slice(0, 30).map((photo, idx) => (
+                    <button
+                      key={`${photo}-${idx}`}
+                      type="button"
+                      className="rounded-xl overflow-hidden bg-muted border aspect-square"
+                      onClick={() => setPhotoPreview(photo)}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={photo} alt={`foto-${idx}`} className="h-full w-full object-cover" />
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
