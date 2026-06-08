@@ -7,6 +7,7 @@ import { XP_RULES } from '@/lib/gamification/standards'
 
 const VOTES_KEY = 'picada.hot.votes.v1'
 const USER_VOTES_KEY = 'picada.hot.userVotes.v1'
+const VOTE_META_KEY = 'picada.vote.meta.v1'
 const VISIT_LATER_KEY = 'picada.pending.dishes.v1'
 const SOCIAL_UPDATED_EVENT = 'picada:social-updated'
 
@@ -82,6 +83,11 @@ export async function votePicada(
   if (typeof window !== 'undefined') {
     window.localStorage.setItem(VOTES_KEY, JSON.stringify(votes))
     window.localStorage.setItem(USER_VOTES_KEY, JSON.stringify(userVotes))
+    if (meta?.placeName) {
+      const voteMeta = readJson<Record<string, { name: string; address?: string }>>(VOTE_META_KEY, {})
+      voteMeta[picadaId] = { name: meta.placeName, address: meta.placeAddress }
+      window.localStorage.setItem(VOTE_META_KEY, JSON.stringify(voteMeta))
+    }
   }
 
   emitSocialUpdated(picadaId)

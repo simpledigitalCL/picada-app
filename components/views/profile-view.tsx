@@ -358,10 +358,22 @@ function VotedPicadasTab() {
       const votesRaw = window.localStorage.getItem('picada.hot.userVotes.v1')
       const votes: Record<string, boolean> = votesRaw ? JSON.parse(votesRaw) : {}
       const ids = Object.entries(votes).filter(([, v]) => v).map(([id]) => id)
+
+      const metaRaw = window.localStorage.getItem('picada.vote.meta.v1')
+      const voteMeta: Record<string, { name: string; address?: string }> = metaRaw ? JSON.parse(metaRaw) : {}
+
       const visitedRaw = window.localStorage.getItem('picada.visited.places.v1')
       const visited: Array<{ id: string; name: string; address: string }> = visitedRaw ? JSON.parse(visitedRaw) : []
-      const byId = Object.fromEntries(visited.map(v => [v.id, v]))
-      setVoted(ids.map(id => ({ id, name: byId[id]?.name || id, address: byId[id]?.address })))
+      const byVisited = Object.fromEntries(visited.map(v => [v.id, v]))
+
+      setVoted(ids
+        .map(id => ({
+          id,
+          name: voteMeta[id]?.name || byVisited[id]?.name || null,
+          address: voteMeta[id]?.address || byVisited[id]?.address,
+        }))
+        .filter(p => p.name !== null) as Array<{ id: string; name: string; address?: string }>
+      )
     } catch { /* ignore */ }
     const raw = window.localStorage.getItem('picada.voted.public.v1')
     setVotedPublic(raw !== 'false')
@@ -802,7 +814,7 @@ export function ProfileView({
   }, [settingsOpen, profileTabActive])
 
   return (
-    <ScrollArea className="h-full">
+    <div className="h-full overflow-y-auto overflow-x-hidden">
       <div className="px-4 pt-5 pb-24 space-y-5 max-w-md mx-auto">
         <ProfileFeedieChrome
           lens={profileLens}
@@ -1529,6 +1541,6 @@ export function ProfileView({
           </SheetContent>
         </Sheet>
       </div>
-    </ScrollArea>
+    </div>
   )
 }
