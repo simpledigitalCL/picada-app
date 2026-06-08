@@ -75,6 +75,7 @@ export function usePostFormSubmit() {
       }
       setIsSubmitting(true)
       try {
+        const reviewMediaUrl = input.mediaItems?.[0]?.url || input.mediaUrl || null
         const res = await fetch('/api/places/submit', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...authHeaders },
@@ -89,8 +90,12 @@ export function usePostFormSubmit() {
             region:    input.picadaRegion || undefined,
             phone:     input.picadaPhone || undefined,
             instagram: input.picadaInstagram || undefined,
-            gallery:   input.picadaGalleryUrl ? [input.picadaGalleryUrl] : undefined,
+            gallery:   reviewMediaUrl ? [reviewMediaUrl] : undefined,
             tags:      input.tags,
+            review_rating:    input.rating > 0 ? input.rating : undefined,
+            review_comment:   input.comment?.trim() || undefined,
+            review_moods:     input.moods?.length ? input.moods : undefined,
+            review_media_url: reviewMediaUrl || undefined,
           }),
         })
         if (!res.ok) {

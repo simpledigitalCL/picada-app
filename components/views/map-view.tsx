@@ -492,7 +492,7 @@ export function MapView({ onSelect, active, locationQuery, onLocationChange }: M
               position:absolute;bottom:-2px;left:50%;transform:translateX(-50%);
               background:#111827;color:#fff;border-radius:999px;
               padding:1px 6px;font-size:10px;font-weight:700;border:1px solid rgba(255,255,255,.35);
-            ">${p.rating ? p.rating.toFixed(1) : 'N/A'}★</div>
+            ">${(p.picadaRating ?? p.rating) ? (p.picadaRating ?? p.rating)!.toFixed(1) : 'N/A'}★</div>
             ${reviewsCount > 0 ? `<div style="position:absolute;top:-3px;right:-3px;width:16px;height:16px;border-radius:999px;background:#f97316;color:white;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;">${reviewsCount}</div>` : ''}
             ${p.picadaReviews && p.picadaReviews >= 5 ? `<div style="position:absolute;top:-1px;left:-2px;font-size:10px;">🔥</div>` : ''}
           </div>`,
@@ -638,17 +638,12 @@ export function MapView({ onSelect, active, locationQuery, onLocationChange }: M
                     )}
                     <div className="flex items-center gap-1 mt-1">
                       <Star className="size-3 fill-yellow-500 stroke-none" />
-                      <span className="text-xs font-bold">{selectedExternal.rating?.toFixed(1) || 'N/A'}</span>
-                      <span className="text-xs text-muted-foreground">· {selectedExternal.reviews || 0} reseñas</span>
+                      <span className="text-xs font-bold">{(selectedExternal.picadaRating ?? selectedExternal.rating)?.toFixed(1) || 'N/A'}</span>
+                      <span className="text-xs text-muted-foreground">· {(selectedExternal.picadaReviews || selectedExternal.reviews) || 0} reseñas</span>
                     </div>
                     <p className={`text-[10px] mt-0.5 font-medium ${selectedExternal.openNow ? 'text-green-600' : 'text-amber-600'}`}>
                       {selectedExternal.openNow ? 'Abierto ahora' : 'Cierra pronto'}
                     </p>
-                    {(selectedExternal.picadaReviews || 0) > 0 && (
-                      <p className="text-[10px] text-amber-600 mt-0.5">
-                        Picada ★ {selectedExternal.picadaRating?.toFixed(1) || 'N/A'} ({selectedExternal.picadaReviews})
-                      </p>
-                    )}
                     <MatchScore
                       score={selectedExternal.matchScore || computePlaceMatchScore({
                         user: (() => {

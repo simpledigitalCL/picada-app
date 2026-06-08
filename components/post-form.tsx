@@ -222,7 +222,14 @@ export function PostForm({ type, locationQuery, contextRestaurant, draft, onClos
 
     if (type === 'new-picada') {
       confetti({ particleCount: 80, spread: 60, origin: { y: 0.72 } })
-      toast({ title: '¡Picada enviada!', description: 'Será revisada y publicada pronto. ¡Gracias!' })
+      const hasReview = flow.formAccumulator.rating > 0 || flow.formAccumulator.comment.trim().length > 0
+      toast({
+        title: hasReview ? '¡Picada publicada!' : '¡Picada enviada!',
+        description: hasReview
+          ? 'Tu local y reseña ya están visibles en la comunidad.'
+          : 'Será revisada y publicada pronto. ¡Gracias!',
+      })
+      if (hasReview) window.dispatchEvent(new CustomEvent('picada:post-published'))
       handleClose()
       return
     }
@@ -277,22 +284,40 @@ export function PostForm({ type, locationQuery, contextRestaurant, draft, onClos
           />
         )
       }
+      if (flow.step === 1) {
+        return (
+          <NewPicadaDetailsStep
+            name={flow.formAccumulator.picadaName}
+            category={flow.formAccumulator.picadaCategory}
+            phone={flow.formAccumulator.picadaPhone}
+            instagram={flow.formAccumulator.picadaInstagram}
+            onNameChange={v => flow.patchAccumulator({ picadaName: v })}
+            onCategoryChange={v => flow.patchAccumulator({ picadaCategory: v })}
+            onPhoneChange={v => flow.patchAccumulator({ picadaPhone: v })}
+            onInstagramChange={v => flow.patchAccumulator({ picadaInstagram: v })}
+          />
+        )
+      }
+      // step 2: reseña + foto
       return (
-        <NewPicadaDetailsStep
-          name={flow.formAccumulator.picadaName}
-          category={flow.formAccumulator.picadaCategory}
-          phone={flow.formAccumulator.picadaPhone}
-          instagram={flow.formAccumulator.picadaInstagram}
-          onNameChange={v => flow.patchAccumulator({ picadaName: v })}
-          onCategoryChange={v => flow.patchAccumulator({ picadaCategory: v })}
-          onPhoneChange={v => flow.patchAccumulator({ picadaPhone: v })}
-          onInstagramChange={v => flow.patchAccumulator({ picadaInstagram: v })}
-          photoPreview={media.preview}
-          photoUploading={media.uploading}
-          photoError={media.uploadError}
-          fileRef={media.fileRef}
-          onFileChange={media.handleFileChange}
-          onRemovePhoto={() => { media.setPreview(null); media.setUploadedUrl(null) }}
+        <ReviewDetailsStep
+          type="new-picada"
+          rating={flow.formAccumulator.rating}
+          comment={flow.formAccumulator.comment}
+          moods={flow.formAccumulator.moods}
+          placeName={flow.formAccumulator.picadaName}
+          placeCategory={flow.formAccumulator.picadaCategory}
+          onRatingChange={v => flow.patchAccumulator({ rating: v })}
+          onCommentChange={v => flow.patchAccumulator({ comment: v })}
+          onMoodsChange={v => flow.patchAccumulator({ moods: v })}
+          mediaUpload={{
+            items: media.items,
+            canAddMore: media.canAddMore,
+            fileRef: media.fileRef,
+            onPick: () => media.fileRef.current?.click(),
+            onFileChange: media.handleFileChange,
+            onRemove: media.removeItem,
+          }}
         />
       )
     }
@@ -349,6 +374,14 @@ export function PostForm({ type, locationQuery, contextRestaurant, draft, onClos
         onRatingChange={v => flow.patchAccumulator({ rating: v })}
         onCommentChange={v => flow.patchAccumulator({ comment: v })}
         onMoodsChange={v => flow.patchAccumulator({ moods: v })}
+        mediaUpload={{
+          items: media.items,
+          canAddMore: media.canAddMore,
+          fileRef: media.fileRef,
+          onPick: () => media.fileRef.current?.click(),
+          onFileChange: media.handleFileChange,
+          onRemove: media.removeItem,
+        }}
       />
     )
   }

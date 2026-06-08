@@ -104,7 +104,7 @@ export function UserProfileSheet({
 
   return (
     <Sheet open={!!userId} onOpenChange={open => !open && onClose()}>
-      <SheetContent side="bottom" className="h-[92dvh] rounded-t-3xl p-0 flex flex-col overflow-hidden">
+      <SheetContent side="bottom" showCloseButton={false} className="h-[92dvh] rounded-t-3xl p-0 flex flex-col overflow-hidden">
         <SheetTitle className="sr-only">Perfil de usuario</SheetTitle>
 
         {/* Header */}

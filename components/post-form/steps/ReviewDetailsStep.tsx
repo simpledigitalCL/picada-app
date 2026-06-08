@@ -1,10 +1,13 @@
 'use client'
 
+import type { ChangeEvent, RefObject } from 'react'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { StarRating } from '@/components/ui/star-rating'
 import { PostDetailsForm } from '@/components/post-form/PostDetailsForm'
+import { MediaGallery } from '@/components/post-form/MediaGallery'
+import type { MediaUploadItem } from '@/lib/hooks/useMediaUpload'
 
 const MOODS = [
   { id: 'casual',    label: 'Casual',    emoji: '😎' },
@@ -20,6 +23,15 @@ const STAR_LABELS = ['', 'Malo', 'Regular', 'Bueno', 'Muy bueno', 'Excelente']
 const formatRating = (value: number) =>
   value % 1 === 0 ? String(value) : value.toFixed(1).replace('.', ',')
 
+type MediaUploadProps = {
+  items: MediaUploadItem[]
+  canAddMore: boolean
+  fileRef: RefObject<HTMLInputElement | null>
+  onPick: () => void
+  onFileChange: (e: ChangeEvent<HTMLInputElement>) => void
+  onRemove: (id: string) => void
+}
+
 type Props = {
   type?: 'review' | 'incognito' | 'new-picada'
   rating: number
@@ -30,6 +42,7 @@ type Props = {
   onRatingChange: (value: number) => void
   onCommentChange: (value: string) => void
   onMoodsChange: (value: string[]) => void
+  mediaUpload?: MediaUploadProps
 }
 
 export function ReviewDetailsStep({
@@ -42,6 +55,7 @@ export function ReviewDetailsStep({
   onRatingChange,
   onCommentChange,
   onMoodsChange,
+  mediaUpload,
 }: Props) {
   const isPicada = type === 'new-picada'
 
@@ -59,6 +73,30 @@ export function ReviewDetailsStep({
             Estás en: <span className="font-semibold">{placeName || 'Local seleccionado'}</span>
             {placeCategory ? <span className="text-orange-200/90"> · {placeCategory}</span> : null}
           </p>
+        </div>
+      )}
+
+      {/* ── Foto (opcional) ── */}
+      {mediaUpload && (
+        <div className="space-y-1.5">
+          <p className="text-xs font-black uppercase tracking-tight text-orange-100">
+            Foto <span className="text-white/40 font-normal normal-case">(opcional)</span>
+          </p>
+          <input
+            ref={mediaUpload.fileRef}
+            type="file"
+            accept="image/*,video/*"
+            multiple
+            className="hidden"
+            onChange={mediaUpload.onFileChange}
+          />
+          <MediaGallery
+            items={mediaUpload.items}
+            canAddMore={mediaUpload.canAddMore}
+            onPick={mediaUpload.onPick}
+            onRemove={mediaUpload.onRemove}
+            mode="full"
+          />
         </div>
       )}
       {/* ── Calificación ── */}

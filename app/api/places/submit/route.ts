@@ -17,6 +17,10 @@ type SubmitPlaceBody = {
   instagram?: string
   gallery?: string[]
   tags?: string[]
+  review_rating?: number
+  review_comment?: string
+  review_moods?: string[]
+  review_media_url?: string
 }
 
 export async function POST(req: Request) {
@@ -45,6 +49,17 @@ export async function POST(req: Request) {
   const gallery   = Array.isArray(body.gallery) ? body.gallery.filter(u => typeof u === 'string').slice(0, 10) : []
   const tags      = Array.isArray(body.tags) ? body.tags.slice(0, 20) : []
 
+  const reviewRating  = typeof body.review_rating === 'number' && body.review_rating > 0
+    ? Math.min(5, Math.max(0.5, body.review_rating))
+    : null
+  const reviewComment = body.review_comment ? sanitizeUserText(body.review_comment).slice(0, 1000) : null
+  const reviewMoods   = Array.isArray(body.review_moods) ? body.review_moods.slice(0, 10) : []
+  const reviewMedia   = typeof body.review_media_url === 'string' && /^https?:\/\//i.test(body.review_media_url)
+    ? body.review_media_url
+    : null
+
+  const hasReview = reviewRating !== null || Boolean(reviewComment)
+
   const externalId = `user-${authUser.id}-${Date.now()}`
 
   const { data, error } = await supabase
@@ -63,7 +78,7 @@ export async function POST(req: Request) {
       phone,
       website:      instagram ? `https://instagram.com/${instagram.replace(/^@/, '')}` : null,
       gallery,
-      status:       'pending',
+      status:       hasReview ? 'active' : 'pending',
       submitted_by: authUser.id,
       raw_payload:  { instagram, tags, submitted_at: new Date().toISOString() },
       last_synced_at: new Date().toISOString(),
@@ -75,7 +90,46 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 })
   }
 
-  // Invalidar snapshot cacheado para que el nuevo lugar aparezca en el próximo discover
+  const placeId = data.id
+  let postId: string | null = null
+
+  if (hasReview) {
+    const mediaPayload = reviewMedia
+      ? { url: reviewMedia, kind: 'photo', original_payload: { media: { url: reviewMedia } } }
+      : null
+
+    const { data: postData } = await supabase
+      .from('posts')
+      .insert({
+        user_id:    authUser.id,
+        place_id:   placeId,
+        type:       'review',
+        content:    reviewComment || '',
+        nutrition_data: {
+          review: {
+            comment: reviewComment,
+            rating:  reviewRating,
+          },
+          taxonomy: { moods: reviewMoods },
+          ...(mediaPayload ? { original_payload: mediaPayload.original_payload } : {}),
+        },
+      })
+      .select('id')
+      .single()
+
+    if (postData?.id) {
+      postId = postData.id
+
+      if (reviewMedia && postData.id) {
+        supabase
+          .from('post_media')
+          .insert({ post_id: postData.id, url: reviewMedia, kind: 'photo', position: 0 })
+          .then(undefined, () => undefined) as Promise<unknown>
+      }
+    }
+  }
+
+  // Invalidar cache de discovery para que el lugar aparezca
   const locationKey = (commune || city || '').toLowerCase().trim()
   if (locationKey) {
     supabase
@@ -85,5 +139,5 @@ export async function POST(req: Request) {
       .then(undefined, () => undefined) as Promise<unknown>
   }
 
-  return NextResponse.json({ ok: true, value: { place_id: data.id } }, { status: 201 })
+  return NextResponse.json({ ok: true, value: { place_id: placeId, post_id: postId } }, { status: 201 })
 }

@@ -63,9 +63,9 @@ export function usePostFormFlow(type: PostFormType | null) {
   const isReviewFlow = type === 'review' || type === 'incognito'
   const isMediaFlow  = type === 'media'
 
-  // Todos los tipos con contenido enriquecido tienen 2 pasos (0: lugar, 1: detalle+tags)
+  // new-picada tiene 3 pasos: 0 mapa, 1 detalles, 2 reseña
   const maxStep = useMemo(
-    () => (isReviewFlow || isMediaFlow || type === 'new-picada' || type === 'scan' ? 1 : 0),
+    () => (type === 'new-picada' ? 2 : isReviewFlow || isMediaFlow || type === 'scan' ? 1 : 0),
     [isMediaFlow, isReviewFlow, type],
   )
 
@@ -74,7 +74,7 @@ export function usePostFormFlow(type: PostFormType | null) {
     if (type === 'new-picada') {
       if (step === 0) return formAccumulator.picadaLat != null && formAccumulator.picadaLng != null
       if (step === 1) return Boolean(formAccumulator.picadaName.trim()) && Boolean(formAccumulator.picadaCategory)
-      return true
+      return true // step 2 (reseña) siempre se puede saltar/enviar
     }
     if (step !== 0) return true
     if (type === 'media') return Boolean(formAccumulator.selectedPlace)
