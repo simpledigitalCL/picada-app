@@ -304,6 +304,22 @@ export async function persistUnifiedContent(supabase: SupabaseClient, body: Unif
     }).then(undefined, () => undefined) as Promise<unknown>,
   )
 
+  if (userId && placeId && (normalizedCategory === 'review' || normalizedCategory === 'incognito')) {
+    backgroundTasks.push(
+      supabase.from('user_interactions').insert({
+        user_id: userId,
+        place_id: placeId,
+        interaction_type: 'review',
+        context: {
+          source: 'post_submit',
+          category: normalizedCategory,
+          rating,
+          tags: normalizedTags.slice(0, 10),
+        },
+      }).then(undefined, () => undefined) as Promise<unknown>,
+    )
+  }
+
   backgroundTasks.push(
     supabase.from('domain_events').insert({
       event_type: 'CONTENT_CREATED',

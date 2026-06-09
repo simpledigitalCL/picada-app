@@ -16,6 +16,7 @@ import { getDiscoverGeoQueryExtra } from '@/lib/location/discover-geo'
 import { resolveDiscoverLocation, subscribeToLocationChanges } from '@/lib/location/core'
 import { placeTextMatchesLocation } from '@/lib/location/query-match'
 import { getUserInteraction, subscribeToSocialChanges } from '@/lib/social/interactions'
+import { trackImpressions } from '@/lib/api/interactions'
 import { useAppStore } from '@/lib/stores/app-store'
 import { sharePicada } from '@/lib/social/share'
 import { LocationAutocomplete } from '@/components/search/location-autocomplete'
@@ -531,6 +532,15 @@ export function HotPicadaView({ locationQuery, onSelect, onLocationChange, onNew
     () => Math.max(1, ...intentPrioritizedTop.map(p => (p.picadaReviews || 0) + (interactions[p.id]?.picadaVotesCount || 0))),
     [intentPrioritizedTop, interactions],
   )
+
+  useEffect(() => {
+    // active: los tabs quedan montados ocultos; impresión = ranking visible en pantalla
+    if (!active || loading || intentPrioritizedTop.length === 0) return
+    trackImpressions(
+      intentPrioritizedTop.slice(0, 20).map(p => ({ placeRef: p.id })),
+      'hot-picada',
+    )
+  }, [active, loading, intentPrioritizedTop])
 
   return (
     <div className="h-full overflow-y-auto overflow-x-hidden">

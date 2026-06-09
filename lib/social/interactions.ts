@@ -1,6 +1,7 @@
 'use client'
 
 import { syncLocalState, votePicadaRemote } from '@/lib/api/social'
+import { trackInteraction } from '@/lib/api/interactions'
 import { emitDomainEvent } from '@/lib/events'
 import { grantPoints, loadPoints, loadStreak, checkAndUnlockBadges } from '@/lib/gamification/core'
 import { XP_RULES } from '@/lib/gamification/standards'
@@ -113,6 +114,9 @@ export async function votePicada(
     placeAddress: meta?.placeAddress,
     mapsUrl: meta?.mapsUrl,
   })
+  if (shouldVoteUp) {
+    trackInteraction('like', picadaId, { source: 'picada_vote', placeName: meta?.placeName })
+  }
   void votePicadaRemote({ picadaId, voteType: shouldVoteUp ? 'up' : 'down' })
   void syncLocalState({ votes, userVotes, visitLater: getVisitLaterState() })
 
@@ -132,6 +136,8 @@ export function toggleVisitLater(placeName: string): { savedForLater: boolean; l
   }
   emitSocialUpdated(placeName)
   emitDomainEvent('USER_SAVED', { placeName, saved: !exists })
+  // toggleVisitLater solo conoce el nombre del lugar; sin placeRef el id queda en contexto
+  trackInteraction(exists ? 'unsave' : 'save', undefined, { source: 'visit_later', placeName })
   const { votes, userVotes } = getVotesState()
   void syncLocalState({ votes, userVotes, visitLater: next })
   return { savedForLater: !exists, list: next }

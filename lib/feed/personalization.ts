@@ -104,7 +104,10 @@ export function loadPreferences(): FoodPreference {
   }
 }
 
-export function savePreferences(next: FoodPreference): FoodPreference {
+export function savePreferences(
+  next: FoodPreference,
+  opts?: { syncRemote?: boolean },
+): FoodPreference {
   const normalized: FoodPreference = {
     likes: uniqueLower(next.likes),
     restrictions: uniqueLower(next.restrictions),
@@ -114,6 +117,12 @@ export function savePreferences(next: FoodPreference): FoodPreference {
   if (typeof window !== 'undefined') {
     window.localStorage.setItem(PREF_KEY, JSON.stringify(normalized))
     window.dispatchEvent(new CustomEvent('picada:prefs-updated'))
+    // Import dinámico para evitar ciclo con lib/user/preferences-sync
+    if (opts?.syncRemote !== false) {
+      void import('@/lib/user/preferences-sync')
+        .then(m => m.syncPreferencesToServer(normalized))
+        .then(undefined, () => undefined)
+    }
   }
   return normalized
 }
