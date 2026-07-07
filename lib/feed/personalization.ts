@@ -37,7 +37,10 @@ export type ProfileSocialSettings = {
     type: 'photo' | 'review'
     text: string
     place?: string
+    /** Primera media (retrocompat con lectores single). Ahora espejo de media[0]. */
     imageDataUrl?: string
+    /** Lista completa de media (hasta 3 fotos o 1 video). */
+    media?: Array<{ url: string; kind: 'photo' | 'video' }>
     rating?: number
     tags?: string[]
     moods?: string[]
@@ -249,7 +252,7 @@ export function saveProfileSocialSettings(next: ProfileSocialSettings): ProfileS
         const noPostMedia: ProfileSocialSettings = {
           ...noAvatar,
           socialPosts: (noAvatar.socialPosts || [])
-            .map(post => ({ ...post, imageDataUrl: undefined }))
+            .map(post => ({ ...post, imageDataUrl: undefined, media: undefined }))
             .slice(0, 20),
         }
         if (!tryPersist(noPostMedia)) {
@@ -266,6 +269,26 @@ export function saveProfileSocialSettings(next: ProfileSocialSettings): ProfileS
     window.dispatchEvent(new CustomEvent('picada:profile-updated'))
   }
   return normalized
+}
+
+type LocalSocialPost = NonNullable<ProfileSocialSettings['socialPosts']>[number]
+
+/** Quita un post del historial local (localStorage). No toca el servidor. */
+export function removeLocalSocialPost(id: string): void {
+  if (typeof window === 'undefined') return
+  const current = loadProfileSocialSettings()
+  const socialPosts = (current.socialPosts || []).filter(p => p.id !== id)
+  saveProfileSocialSettings({ ...current, socialPosts })
+}
+
+/** Aplica un patch a un post del historial local (si existe). No toca el servidor. */
+export function updateLocalSocialPost(id: string, patch: Partial<LocalSocialPost>): void {
+  if (typeof window === 'undefined') return
+  const current = loadProfileSocialSettings()
+  const socialPosts = (current.socialPosts || []).map(p =>
+    p.id === id ? { ...p, ...patch } : p,
+  )
+  saveProfileSocialSettings({ ...current, socialPosts })
 }
 
 export function hasSeenPicadaTooltip(): boolean {

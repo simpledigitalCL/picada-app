@@ -6,7 +6,7 @@ import type { PlaceTaggingMeta } from '@/lib/tags/types'
 import { ingestTagRelationStats } from '@/lib/server/tag-relations'
 import { sanitizeUserText } from '@/lib/utils/sanitize'
 
-function normalizeUuid(input?: string | null): string | null {
+export function normalizeUuid(input?: string | null): string | null {
   const value = String(input || '').trim()
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
     ? value

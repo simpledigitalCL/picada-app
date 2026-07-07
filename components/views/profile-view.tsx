@@ -45,6 +45,10 @@ import { AuthQuickRegister } from '@/components/auth/auth-quick-register'
 import { CreatorDashboard } from '@/components/views/creator-dashboard'
 import { LeaderboardPanel } from '@/components/views/leaderboard-panel'
 import { XpChip } from '@/components/gamification/xp-chip'
+import { StarRating } from '@/components/ui/star-rating'
+import { MediaCarousel } from '@/components/feed/media-carousel'
+import { PostOwnerMenu } from '@/components/post/post-owner-menu'
+import { PostEditSheet, type EditablePost } from '@/components/post/post-edit-sheet'
 import { cn } from '@/lib/utils'
 import {
   DIETARY_RESTRICTIONS_CATALOG,
@@ -497,6 +501,7 @@ export function ProfileView({
     text: string
     place?: string
     imageDataUrl?: string
+    media?: Array<{ url: string; kind: 'photo' | 'video' }>
     rating?: number
     createdAt: string
   }>>([])
@@ -507,6 +512,7 @@ export function ProfileView({
   const [profileLens, setProfileLens] = useState<ProfileLens>('foodie')
   const wasProfileTabActive = useRef(false)
   const [selectedPhoto, setSelectedPhoto] = useState<(typeof socialPosts)[0] | null>(null)
+  const [editingPost, setEditingPost] = useState<EditablePost | null>(null)
   const [influencePoints, setInfluencePoints] = useState(0)
   const [recommendationClicks, setRecommendationClicks] = useState(0)
   const [followers, setFollowers] = useState(0)
@@ -549,7 +555,7 @@ export function ProfileView({
           })
         // Cargar posts propios del servidor para que aparezcan en la grilla
         fetch(`/api/social-feed?user_id=${encodeURIComponent(userId)}&limit=40`)
-          .then(r => r.ok ? r.json() as Promise<{ posts: Array<{ id: string; type: string; content: string | null; rating: number | null; place_name: string | null; media_url: string | null; created_at: string }> }> : { posts: [] })
+          .then(r => r.ok ? r.json() as Promise<{ posts: Array<{ id: string; type: string; content: string | null; rating: number | null; place_name: string | null; media_url: string | null; media?: Array<{ url: string; kind: 'photo' | 'video' }>; created_at: string }> }> : { posts: [] })
           .then(({ posts }) => {
             if (!posts?.length) return
             setSocialPosts(prev => {
@@ -562,6 +568,7 @@ export function ProfileView({
                   text: p.content || '',
                   place: p.place_name ?? undefined,
                   imageDataUrl: p.media_url ?? undefined,
+                  media: p.media?.length ? p.media : undefined,
                   rating: p.rating ?? undefined,
                   createdAt: p.created_at,
                 }))
@@ -619,7 +626,7 @@ export function ProfileView({
         })
       // Recargar posts del usuario con el UUID real de Supabase
       fetch(`/api/social-feed?user_id=${encodeURIComponent(userId)}&limit=60`)
-        .then(r => r.ok ? r.json() as Promise<{ posts: Array<{ id: string; type: string; content: string | null; rating: number | null; place_name: string | null; media_url: string | null; created_at: string }> }> : { posts: [] })
+        .then(r => r.ok ? r.json() as Promise<{ posts: Array<{ id: string; type: string; content: string | null; rating: number | null; place_name: string | null; media_url: string | null; media?: Array<{ url: string; kind: 'photo' | 'video' }>; created_at: string }> }> : { posts: [] })
         .then(({ posts }) => {
           if (!posts?.length) return
           setSocialPosts(prev => {
@@ -632,6 +639,7 @@ export function ProfileView({
                 text: p.content || '',
                 place: p.place_name ?? undefined,
                 imageDataUrl: p.media_url ?? undefined,
+                media: p.media?.length ? p.media : undefined,
                 rating: p.rating ?? undefined,
                 createdAt: p.created_at,
               }))
@@ -641,6 +649,34 @@ export function ProfileView({
         .catch(() => undefined)
     })
   }, [isAuthed])
+
+  // Sincroniza grilla + modal cuando se edita o elimina un post (desde el menú ⋯).
+  useEffect(() => {
+    const onDeleted = (e: Event) => {
+      const id = (e as CustomEvent<{ id: string }>).detail?.id
+      if (!id) return
+      setSocialPosts(prev => prev.filter(p => p.id !== id))
+      setSelectedPhoto(prev => (prev?.id === id ? null : prev))
+    }
+    const onUpdated = (e: Event) => {
+      const d = (e as CustomEvent<{ id: string; text: string; rating: number; media: Array<{ url: string; kind: 'photo' | 'video' }> }>).detail
+      if (!d?.id) return
+      const patch = {
+        text: d.text,
+        rating: d.rating || undefined,
+        media: d.media?.length ? d.media : undefined,
+        imageDataUrl: d.media?.[0]?.url,
+      }
+      setSocialPosts(prev => prev.map(p => (p.id === d.id ? { ...p, ...patch } : p)))
+      setSelectedPhoto(prev => (prev?.id === d.id ? { ...prev, ...patch } : prev))
+    }
+    window.addEventListener('picada:post-deleted', onDeleted)
+    window.addEventListener('picada:post-updated', onUpdated)
+    return () => {
+      window.removeEventListener('picada:post-deleted', onDeleted)
+      window.removeEventListener('picada:post-updated', onUpdated)
+    }
+  }, [])
 
   useEffect(() => {
     const updateInfluence = () => {
@@ -1043,14 +1079,41 @@ export function ProfileView({
             <SheetTitle className="sr-only">Foto</SheetTitle>
             <div className="w-10 h-1 bg-muted-foreground/30 rounded-full mx-auto mt-3 shrink-0" />
             {selectedPhoto && (
+              <div className="absolute left-2 top-2 z-10">
+                <PostOwnerMenu
+                  postId={selectedPhoto.id}
+                  isOwn
+                  onEdit={() => setEditingPost({
+                    id: selectedPhoto.id,
+                    text: selectedPhoto.text,
+                    rating: selectedPhoto.rating,
+                    media: selectedPhoto.media?.length
+                      ? selectedPhoto.media
+                      : selectedPhoto.imageDataUrl
+                        ? [{ url: selectedPhoto.imageDataUrl, kind: selectedPhoto.imageDataUrl.startsWith('data:video') ? 'video' : 'photo' }]
+                        : [],
+                  })}
+                  onDeleted={() => setSelectedPhoto(null)}
+                />
+              </div>
+            )}
+            {selectedPhoto && (() => {
+              // Multi-media con fallback a la forma antigua (imageDataUrl single).
+              const carouselMedia: Array<{ url: string; kind: 'photo' | 'video' }> = selectedPhoto.media?.length
+                ? selectedPhoto.media
+                : selectedPhoto.imageDataUrl
+                  ? [{
+                      url: selectedPhoto.imageDataUrl,
+                      kind: (selectedPhoto.imageDataUrl.startsWith('data:video') ? 'video' : 'photo') as 'photo' | 'video',
+                    }]
+                  : []
+              return (
               <div className="flex flex-col flex-1 overflow-y-auto">
-                <div className="relative bg-black flex items-center justify-center" style={{ maxHeight: '60dvh' }}>
-                  {selectedPhoto.imageDataUrl?.startsWith('data:video') ? (
-                    <video src={selectedPhoto.imageDataUrl} controls playsInline className="max-h-[60dvh] w-full object-contain" />
-                  ) : (
-                    <img src={selectedPhoto.imageDataUrl!} alt="" className="max-h-[60dvh] w-full object-contain" />
-                  )}
-                </div>
+                {carouselMedia.length > 0 && (
+                  <div className="bg-black">
+                    <MediaCarousel media={carouselMedia} />
+                  </div>
+                )}
                 <div className="px-4 py-4 space-y-2">
                   {selectedPhoto.place && (
                     <p className="text-xs text-orange-600 font-medium flex items-center gap-1">
@@ -1062,19 +1125,26 @@ export function ProfileView({
                     <p className="text-sm leading-relaxed">{selectedPhoto.text}</p>
                   )}
                   {selectedPhoto.rating ? (
-                    <p className="text-sm text-amber-500 font-semibold">
-                      {'★'.repeat(selectedPhoto.rating)}{'☆'.repeat(5 - selectedPhoto.rating)}
-                      <span className="text-xs text-muted-foreground ml-1 font-normal">{selectedPhoto.rating}/5</span>
-                    </p>
+                    <div className="flex items-center gap-1.5">
+                      <StarRating value={selectedPhoto.rating} readOnly size={16} />
+                      <span className="text-xs text-muted-foreground">{selectedPhoto.rating}/5</span>
+                    </div>
                   ) : null}
                   <p className="text-[11px] text-muted-foreground">
                     {new Date(selectedPhoto.createdAt).toLocaleDateString('es-CL', { day: 'numeric', month: 'long', year: 'numeric' })}
                   </p>
                 </div>
               </div>
-            )}
+              )
+            })()}
           </SheetContent>
         </Sheet>
+
+        <PostEditSheet
+          post={editingPost}
+          open={!!editingPost}
+          onOpenChange={open => !open && setEditingPost(null)}
+        />
 
         <Sheet open={settingsOpen} onOpenChange={(open) => { setSettingsOpen(open); if (!open) setSettingsSubView(null) }}>
           <SheetContent side="bottom" className="h-[92dvh] rounded-t-3xl flex flex-col gap-0 p-0 overflow-hidden">
