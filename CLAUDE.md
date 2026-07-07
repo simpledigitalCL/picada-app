@@ -295,7 +295,7 @@ Copy `.env.example` to `.env` (this project uses `.env`, not `.env.local`):
 - **Modals/sheets**: always use `side="bottom"` with `h-[92dvh] rounded-t-3xl p-0 flex flex-col overflow-hidden`. Never use `side="right"` for complex content — it creates a narrow sidebar that clips on mobile.
 - **ScrollArea overflow**: Radix UI injects `display: table; min-width: 100%` via inline style on the inner content wrapper, which bypasses CSS `overflow: hidden`. The fix (already applied in `components/ui/scroll-area.tsx`) wraps children in `<div className="w-full overflow-x-hidden">`. Do not remove this wrapper.
 - **ScrollArea vs native div**: for full-height scrollable tab views (e.g. `hot-picada-view`), use `<div className="h-full overflow-y-auto overflow-x-hidden">` instead of `ScrollArea` — Radix ScrollArea has layout issues on mobile at the tab level.
-- **shadcn/ui components**: do not manually edit files in `components/ui/` except for established fixes (the ScrollArea wrapper above, the `aria-describedby={undefined}` on Sheet).
+- **shadcn/ui components**: do not manually edit files in `components/ui/` except for established fixes (the ScrollArea wrapper above, the `aria-describedby={undefined}` on Sheet, and the Sheet close `XIcon` at `size-5` to match other 20px action icons).
 - **`CardContent` padding**: default is `px-6`. In dense layouts (grids, cards inside sheets) override with `px-3` or `px-4` to prevent horizontal overflow on narrow viewports.
 - **Card spacing**: when cards have image content flush to the edge, add `p-0 gap-0` to the `Card` className to remove default shadcn padding.
 

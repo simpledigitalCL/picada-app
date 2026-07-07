@@ -1079,7 +1079,7 @@ export function ProfileView({
             <SheetTitle className="sr-only">Foto</SheetTitle>
             <div className="w-10 h-1 bg-muted-foreground/30 rounded-full mx-auto mt-3 shrink-0" />
             {selectedPhoto && (
-              <div className="absolute left-2 top-2 z-10">
+              <div className="absolute left-3 top-3 z-10">
                 <PostOwnerMenu
                   postId={selectedPhoto.id}
                   isOwn
@@ -1108,7 +1108,9 @@ export function ProfileView({
                     }]
                   : []
               return (
-              <div className="flex flex-col flex-1 overflow-y-auto">
+              // pt-10 reserva la franja superior donde viven el menú ⋮ y la X del sheet,
+              // para que la foto no quede pegada a los botones
+              <div className="flex flex-col flex-1 overflow-y-auto pt-6">
                 {carouselMedia.length > 0 && (
                   <div className="bg-black">
                     <MediaCarousel media={carouselMedia} />
