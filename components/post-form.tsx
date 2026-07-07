@@ -162,6 +162,21 @@ export function PostForm({ type, locationQuery, contextRestaurant, draft, onClos
     const mediaUrl = mediaItems[0]?.url ||
       (media.preview && /^https?:\/\//i.test(media.preview) ? media.preview : null)
 
+    // Guard: no publicar con fotos a medio subir o en error. Evita perder media
+    // en silencio (causa del bug "puse 3 fotos y se subió 1"). new-picada usa
+    // otro canal de foto (picadaGalleryUrl), así que se excluye.
+    if (kind !== 'new-picada') {
+      const pendingMedia = media.items.filter(it => !it.url || !/^https?:\/\//i.test(it.url))
+      if (pendingMedia.length > 0) {
+        toast({
+          title: 'Faltan fotos por subir',
+          description: 'Algunas fotos no terminaron de subir. Reintenta o quítalas antes de publicar.',
+          variant: 'destructive',
+        })
+        return
+      }
+    }
+
     const selected = flow.formAccumulator.selectedPlace
       ? {
           id:      flow.formAccumulator.selectedPlace.id,
@@ -243,6 +258,7 @@ export function PostForm({ type, locationQuery, contextRestaurant, draft, onClos
       text: flow.formAccumulator.comment || '',
       place: flow.formAccumulator.selectedPlace?.name,
       imageDataUrl: mediaUrl ?? undefined,
+      media: mediaItems.length > 0 ? mediaItems : undefined,
       rating: flow.formAccumulator.rating || undefined,
       tags: flow.formAccumulator.contentTags,
       moods: flow.formAccumulator.moods,
@@ -354,10 +370,13 @@ export function PostForm({ type, locationQuery, contextRestaurant, draft, onClos
           items={media.items}
           canAddMore={media.canAddMore}
           comment={flow.formAccumulator.comment}
+          rating={flow.formAccumulator.rating}
           onPick={() => media.fileRef.current?.click()}
           onFileChange={media.handleFileChange}
           onRemove={media.removeItem}
+          onRetry={media.retryItem}
           onCommentChange={v => flow.patchAccumulator({ comment: v })}
+          onRatingChange={v => flow.patchAccumulator({ rating: v })}
         />
       )
     }
@@ -513,7 +532,7 @@ export function PostForm({ type, locationQuery, contextRestaurant, draft, onClos
             <Button
               className="flex-1 rounded-2xl h-12 bg-orange-500 hover:bg-orange-600 text-white font-semibold"
               onClick={handleSubmit}
-              disabled={submitter.isSubmitting || media.uploading || media.compressing}
+              disabled={submitter.isSubmitting || media.uploading || media.compressing || media.hasErrors}
             >
               {submitter.isSubmitting
                 ? (type === 'new-picada' ? 'Enviando…' : 'Publicando…')
@@ -521,9 +540,11 @@ export function PostForm({ type, locationQuery, contextRestaurant, draft, onClos
                   ? `Comprimiendo… ${media.compressProgress}%`
                   : media.uploading
                     ? 'Subiendo archivo…'
-                    : type === 'new-picada'
-                      ? 'Agregar picada'
-                      : 'Publicar'}
+                    : media.hasErrors
+                      ? 'Reintenta las fotos con error'
+                      : type === 'new-picada'
+                        ? 'Agregar picada'
+                        : 'Publicar'}
             </Button>
           )}
         </div>

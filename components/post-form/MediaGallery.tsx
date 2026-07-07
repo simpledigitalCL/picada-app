@@ -1,6 +1,6 @@
 'use client'
 
-import { Plus, X, Video } from 'lucide-react'
+import { Plus, X, Video, RotateCw } from 'lucide-react'
 import type { MediaUploadItem } from '@/lib/hooks/useMediaUpload'
 
 type Props = {
@@ -8,10 +8,11 @@ type Props = {
   canAddMore: boolean
   onPick: () => void
   onRemove: (id: string) => void
+  onRetry?: (id: string) => void
   mode?: 'compact' | 'full'
 }
 
-export function MediaGallery({ items, canAddMore, onPick, onRemove, mode = 'compact' }: Props) {
+export function MediaGallery({ items, canAddMore, onPick, onRemove, onRetry, mode = 'compact' }: Props) {
   const empty = items.length === 0
 
   if (empty && mode === 'full') {
@@ -59,9 +60,14 @@ export function MediaGallery({ items, canAddMore, onPick, onRemove, mode = 'comp
                 </div>
               )}
               {item.error && (
-                <div className="absolute inset-0 flex items-center justify-center bg-red-900/50 p-1 text-center text-[9px] text-white">
-                  Error
-                </div>
+                <button
+                  type="button"
+                  onClick={() => onRetry?.(item.id)}
+                  className="absolute inset-0 flex flex-col items-center justify-center gap-0.5 bg-red-900/60 p-1 text-center text-[9px] font-medium text-white"
+                >
+                  <RotateCw className="size-4" />
+                  Reintentar
+                </button>
               )}
 
               <button

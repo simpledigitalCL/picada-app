@@ -15,6 +15,10 @@ export type MediaUploadItem = {
 
 export const MAX_PHOTOS = 3
 
+// Subidas transitorias (red caída / 5xx / 429) se reintentan una vez de forma
+// automática antes de marcar el item como fallido.
+const MAX_UPLOAD_ATTEMPTS = 2
+
 function mapUploadError(status: number, code: string): string {
   if (status === 401 || code === 'unauthorized') return 'Debes iniciar sesión para adjuntar fotos o videos.'
   if (status === 413 || code === 'file_too_large') return 'Archivo demasiado grande. Intenta con uno más liviano.'
@@ -31,6 +35,8 @@ export function useMediaUpload() {
   const [limitError, setLimitError] = useState<string | null>(null)
 
   const itemsRef = useRef<MediaUploadItem[]>([])
+  // Guardamos el File original por id para poder reintentar una subida fallida.
+  const filesRef = useRef<Map<string, File>>(new Map())
   const idSeq = useRef(0)
   const newId = () => `m${Date.now()}-${idSeq.current++}`
 
@@ -47,6 +53,7 @@ export function useMediaUpload() {
 
   const resetMedia = () => {
     itemsRef.current = []
+    filesRef.current.clear()
     setItems([])
     setCompressing(false)
     setCompressProgress(0)
@@ -54,6 +61,8 @@ export function useMediaUpload() {
   }
 
   const uploadItem = async (id: string, file: File, kind: 'photo' | 'video') => {
+    filesRef.current.set(id, file)
+    patch(id, { uploading: true, error: null })
     try {
       let fileToUpload = file
       if (kind === 'video') {
@@ -69,23 +78,47 @@ export function useMediaUpload() {
         fileToUpload = await compressImage(file)
       }
 
-      const form = new FormData()
-      form.append('file', fileToUpload)
       const authHeaders = await getAuthHeaders()
-      const res = await fetch('/api/upload', { method: 'POST', body: form, headers: authHeaders })
 
-      if (res.ok) {
-        const data = (await res.json()) as { ok: boolean; url?: string }
-        if (data.ok && data.url) patch(id, { url: data.url, uploading: false, error: null })
-        else patch(id, { uploading: false, error: 'No se pudo subir el archivo. Reintenta.' })
-      } else {
-        const errJson = (await res.json().catch(() => ({}))) as { error?: string }
-        patch(id, { uploading: false, error: mapUploadError(res.status, String(errJson.error || '')) })
+      // Reintenta subidas transitorias (red caída o 5xx/429). La compresión se
+      // hace una sola vez arriba; solo se re-emite el POST.
+      for (let attempt = 1; attempt <= MAX_UPLOAD_ATTEMPTS; attempt++) {
+        try {
+          const form = new FormData()
+          form.append('file', fileToUpload)
+          const res = await fetch('/api/upload', { method: 'POST', body: form, headers: authHeaders })
+
+          if (res.ok) {
+            const data = (await res.json()) as { ok: boolean; url?: string }
+            if (data.ok && data.url) { patch(id, { url: data.url, uploading: false, error: null }); return }
+            if (attempt < MAX_UPLOAD_ATTEMPTS) continue
+            patch(id, { uploading: false, error: 'No se pudo subir el archivo. Reintenta.' })
+            return
+          }
+
+          // 5xx/429 son transitorios → reintenta; los 4xx de cliente (401/413/415) no.
+          if ((res.status >= 500 || res.status === 429) && attempt < MAX_UPLOAD_ATTEMPTS) continue
+          const errJson = (await res.json().catch(() => ({}))) as { error?: string }
+          patch(id, { uploading: false, error: mapUploadError(res.status, String(errJson.error || '')) })
+          return
+        } catch (err) {
+          // Error de red → reintenta si quedan intentos, si no propaga al catch externo.
+          if (attempt < MAX_UPLOAD_ATTEMPTS) continue
+          throw err
+        }
       }
     } catch {
       setCompressing(false)
       patch(id, { uploading: false, error: 'Falló la subida del archivo. Reintenta.' })
     }
+  }
+
+  /** Reintenta la subida de un item que quedó en error (mismo File original). */
+  const retryItem = (id: string) => {
+    const file = filesRef.current.get(id)
+    const item = itemsRef.current.find(i => i.id === id)
+    if (!file || !item) return
+    void uploadItem(id, file, item.kind)
   }
 
   /** Agrega archivos respetando la regla: hasta 3 fotos O 1 video (sin mezclar). */
@@ -134,7 +167,25 @@ export function useMediaUpload() {
 
   const removeItem = (id: string) => {
     setLimitError(null)
+    filesRef.current.delete(id)
     update(prev => prev.filter(it => it.id !== id))
+  }
+
+  /** Siembra la galería con media ya subida (para el modo edición de un post). */
+  const seedMedia = (media: Array<{ url: string; kind: 'photo' | 'video' }>) => {
+    filesRef.current.clear()
+    const seeded = media
+      .filter(m => m.url && m.url.trim())
+      .slice(0, 3)
+      .map(m => ({
+        id: newId(),
+        preview: m.url,
+        url: m.url,
+        kind: m.kind === 'video' ? ('video' as const) : ('photo' as const),
+        uploading: false,
+        error: null,
+      }))
+    update(() => seeded)
   }
 
   // ── Accesores de retrocompatibilidad (single) para new-picada y restauración de borrador ──
@@ -154,6 +205,7 @@ export function useMediaUpload() {
   const hasVideo = items.some(i => i.kind === 'video')
   const photoCount = items.filter(i => i.kind === 'photo').length
   const canAddMore = !hasVideo && photoCount < MAX_PHOTOS
+  const hasErrors = items.some(i => i.error != null)
 
   return {
     fileRef,
@@ -161,9 +213,12 @@ export function useMediaUpload() {
     addFiles,
     handleFileChange,
     removeItem,
+    retryItem,
     resetMedia,
+    seedMedia,
     hasVideo,
     canAddMore,
+    hasErrors,
     compressing,
     compressProgress,
     // Compat single-accessors

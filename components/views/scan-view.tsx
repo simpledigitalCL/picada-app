@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef } from 'react'
+import { trackInteraction } from '@/lib/api/interactions'
 import Image from 'next/image'
 import { Camera, Upload, Loader2, Share2, Sparkles, Zap } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -64,6 +65,7 @@ export function ScanView() {
         }
         if (data.error) throw new Error(data.error)
         setResult(data)
+        trackInteraction('scan', undefined, { source: 'dish_scanner', dish: data?.nombre_estimado || null })
         window.dispatchEvent(new CustomEvent('picada:scan-complete'))
       } catch {
         setScannerError('No se pudo analizar la imagen. Intenta nuevamente.')

@@ -35,6 +35,8 @@ import { Toaster as SonnerToaster } from '@/components/ui/sonner'
 import { AdvancedSearchModal } from '@/components/search/advanced-search-modal'
 import { getSupabaseBrowserClient } from '@/lib/supabase'
 import { ensureProfileForSession } from '@/lib/auth/sync-profile'
+import { linkAnonIdentity, reconcilePreferencesOnLogin } from '@/lib/user/preferences-sync'
+import { trackInteraction } from '@/lib/api/interactions'
 import { syncCollectionsFromSupabase } from '@/lib/social/collections'
 import { syncBadgesFromSupabase } from '@/lib/gamification/core'
 import { AuthQuickRegister } from '@/components/auth/auth-quick-register'
@@ -151,7 +153,12 @@ export default function Home() {
       const authed = Boolean(data.session?.user)
       setIsAuthed(authed)
       if (authed) setAuthRequiredOpen(false)
-      if (data.session) void ensureProfileForSession(data.session)
+      if (data.session) {
+        // linkAnonIdentity lee el id anónimo ANTES de que ensureProfileForSession lo pise
+        linkAnonIdentity(data.session.user.id)
+        void ensureProfileForSession(data.session)
+        void reconcilePreferencesOnLogin(data.session.user.id)
+      }
     })
     const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_OUT') {
@@ -168,7 +175,9 @@ export default function Home() {
       setIsAuthed(authed)
       if (authed) setAuthRequiredOpen(false)
       if (session) {
+        linkAnonIdentity(session.user.id)
         void ensureProfileForSession(session)
+        void reconcilePreferencesOnLogin(session.user.id)
         void syncCollectionsFromSupabase()
         void syncBadgesFromSupabase()
       }
@@ -250,6 +259,7 @@ export default function Home() {
   const VISITED_KEY = 'picada.visited.places.v1'
   const handleSelect = (r: Restaurant) => {
     setSelected(r)
+    trackInteraction('detail_view', r.id, { name: r.name })
     emitDomainEvent('USER_VISITED', {
       placeId: r.id,
       placeName: r.name,
