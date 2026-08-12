@@ -5,8 +5,14 @@ import { placeTextMatchesLocation } from '@/lib/location/query-match'
 export type SocialPost = {
   id: string
   user_id: string
+  /** UUID del local al que pertenece la publicación, si fue resuelto. */
+  place_id: string | null
   username: string
   place_name: string | null
+  place_address?: string | null
+  place_lat?: number | null
+  place_lng?: number | null
+  place_maps_url?: string | null
   content: string | null
   rating: number | null
   type: 'review' | 'photo' | 'video' | 'incognito' | 'tip'
@@ -89,12 +95,16 @@ export async function GET(req: Request) {
   if (error) return NextResponse.json({ posts: [] })
 
   const postIds = (data || []).map(r => r.id).filter(Boolean)
+  const placeIds = [...new Set((data || []).map(r => r.place_id).filter(Boolean))]
 
-  // Batch-fetch usernames, like counts and media in parallel
+  // Batch-fetch usernames, datos del local, likes y media en paralelo.
   const userIds = [...new Set((data || []).map(r => r.user_id).filter(Boolean))]
-  const [profilesRes, likesRes, mediaRes] = await Promise.all([
+  const [profilesRes, placesRes, likesRes, mediaRes] = await Promise.all([
     userIds.length > 0
       ? supabase.from('profiles').select('id, username').in('id', userIds)
+      : Promise.resolve({ data: [] }),
+    placeIds.length > 0
+      ? supabase.from('places').select('id, address, lat, lng, maps_url').in('id', placeIds)
       : Promise.resolve({ data: [] }),
     postIds.length > 0
       ? supabase.from('post_likes').select('post_id').in('post_id', postIds)
@@ -117,6 +127,11 @@ export async function GET(req: Request) {
   const profileByUserId = new Map<string, string>()
   for (const p of (profilesRes.data || []) as Array<{ id: string; username: string }>) {
     if (p.username) profileByUserId.set(p.id, p.username)
+  }
+
+  const placeById = new Map<string, { address: string | null; lat: number | null; lng: number | null; maps_url: string | null }>()
+  for (const p of (placesRes.data || []) as Array<{ id: string; address: string | null; lat: number | null; lng: number | null; maps_url: string | null }>) {
+    placeById.set(p.id, p)
   }
 
   const likeCountByPost = new Map<string, number>()
@@ -146,12 +161,18 @@ export async function GET(req: Request) {
       }
     }
     const mediaUrl: string | null = mediaArr[0]?.url ?? null
+    const place = row.place_id ? placeById.get(row.place_id) : null
 
     return {
       id: row.id,
       user_id: row.user_id,
+      place_id: row.place_id || null,
       username,
       place_name: row.place_name || null,
+      place_address: place?.address ?? null,
+      place_lat: place?.lat ?? null,
+      place_lng: place?.lng ?? null,
+      place_maps_url: place?.maps_url ?? null,
       content: row.content || null,
       rating: row.rating || null,
       type: row.type,

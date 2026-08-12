@@ -662,6 +662,10 @@ export function ProfileView({
     })
   }, [isAuthed])
 
+  useEffect(() => {
+    if (!isAuthed) setProfileLens('foodie')
+  }, [isAuthed])
+
   // Sincroniza grilla + modal cuando se edita o elimina un post (desde el menú ⋯).
   useEffect(() => {
     const onDeleted = (e: Event) => {
@@ -853,6 +857,7 @@ export function ProfileView({
     <div className="h-full overflow-y-auto overflow-x-hidden">
       <div className="px-4 pt-5 pb-24 space-y-5 max-w-md mx-auto">
         <ProfileFeedieChrome
+          isAuthed={isAuthed}
           lens={profileLens}
           onLensChange={setProfileLens}
           username={username}

@@ -385,6 +385,8 @@ function FoodieMark({ className }: { className?: string }) {
 }
 
 export type ProfileFeedieChromeProps = {
+  /** Las superficies personales solo están disponibles con una sesión activa. */
+  isAuthed: boolean
   lens: ProfileLens
   onLensChange: (next: ProfileLens) => void
   username: string
@@ -408,6 +410,7 @@ export type ProfileFeedieChromeProps = {
 }
 
 export function ProfileFeedieChrome({
+  isAuthed,
   lens,
   onLensChange,
   username,
@@ -535,11 +538,13 @@ export function ProfileFeedieChrome({
                 </div>
               </PopoverContent>
             </Popover>
-            <Button variant="ghost" size="icon" className="relative h-9 w-9 text-muted-foreground hover:text-orange-600" aria-label="Notificaciones">
-              <Bell className="size-5" />
-              <span className="absolute right-1.5 top-1.5 size-2 rounded-full bg-orange-500" />
-            </Button>
-            {onOpenSettings ? (
+            {isAuthed ? (
+              <Button variant="ghost" size="icon" className="relative h-9 w-9 text-muted-foreground hover:text-orange-600" aria-label="Notificaciones">
+                <Bell className="size-5" />
+                <span className="absolute right-1.5 top-1.5 size-2 rounded-full bg-orange-500" />
+              </Button>
+            ) : null}
+            {isAuthed && onOpenSettings ? (
               <Button
                 variant="ghost"
                 size="icon"
@@ -550,15 +555,17 @@ export function ProfileFeedieChrome({
                 <Settings className="size-5" />
               </Button>
             ) : null}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-9 w-9 text-muted-foreground hover:text-orange-600"
-              aria-label="Mensajes"
-              onClick={() => setMessagesOpen(true)}
-            >
-              <MessageCircle className="size-5" />
-            </Button>
+            {isAuthed ? (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9 text-muted-foreground hover:text-orange-600"
+                aria-label="Mensajes"
+                onClick={() => setMessagesOpen(true)}
+              >
+                <MessageCircle className="size-5" />
+              </Button>
+            ) : null}
           </div>
         </div>
 
@@ -576,32 +583,36 @@ export function ProfileFeedieChrome({
             <FoodieMark className="shrink-0" />
             Feed
           </button>
-          <button
-            type="button"
-            onClick={() => onLensChange('guardados')}
-            className={cn(
-              'flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold transition-colors',
-              lens === 'guardados'
-                ? 'bg-orange-500 text-white shadow-sm'
-                : 'bg-orange-50/80 text-muted-foreground hover:bg-orange-100/90 hover:text-foreground',
-            )}
-          >
-            <Bookmark className="size-3.5 shrink-0" />
-            Guardados
-          </button>
-          <button
-            type="button"
-            onClick={() => onLensChange('profile')}
-            className={cn(
-              'flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold transition-colors',
-              lens === 'profile'
-                ? 'bg-orange-500 text-white shadow-sm'
-                : 'bg-orange-50/80 text-muted-foreground hover:bg-orange-100/90 hover:text-foreground',
-            )}
-          >
-            <User className="size-4 shrink-0" />
-            Perfil
-          </button>
+          {isAuthed ? (
+            <>
+              <button
+                type="button"
+                onClick={() => onLensChange('guardados')}
+                className={cn(
+                  'flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold transition-colors',
+                  lens === 'guardados'
+                    ? 'bg-orange-500 text-white shadow-sm'
+                    : 'bg-orange-50/80 text-muted-foreground hover:bg-orange-100/90 hover:text-foreground',
+                )}
+              >
+                <Bookmark className="size-3.5 shrink-0" />
+                Guardados
+              </button>
+              <button
+                type="button"
+                onClick={() => onLensChange('profile')}
+                className={cn(
+                  'flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold transition-colors',
+                  lens === 'profile'
+                    ? 'bg-orange-500 text-white shadow-sm'
+                    : 'bg-orange-50/80 text-muted-foreground hover:bg-orange-100/90 hover:text-foreground',
+                )}
+              >
+                <User className="size-4 shrink-0" />
+                Perfil
+              </button>
+            </>
+          ) : null}
         </div>
       </header>
 

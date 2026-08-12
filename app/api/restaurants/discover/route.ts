@@ -361,6 +361,7 @@ async function discoverFromPreloadedPlaces(location: string, key?: string, provi
     .from('places')
     .select('id, provider, external_id, name, address, commune, city, region, maps_url, lat, lng, rating, internal_rating, internal_rating_count, reviews_count, price_level, gallery, raw_payload, tagging_meta')
     .or(conditions.join(','))
+    .eq('status', 'active')
     .order('reviews_count', { ascending: false })
     .limit(200)
   if (providerOnly) dbQuery = dbQuery.eq('provider', providerOnly)
@@ -1112,12 +1113,20 @@ export async function GET(req: Request) {
   const locationDailySnapshotKey = locationDailyKey(normalizedLocation)
   const t0 = Date.now()
 
-  // Fast path: snapshot diario primero — 1 sola query antes de cualquier otra cosa.
-  // Si existe, se devuelve sin leer los 4 contadores de budget.
-  const dailySnapshot = await readDiscoveryCacheByKey(locationDailySnapshotKey)
+  // El snapshot diario acelera el inventario externo, pero las picadas de la
+  // comunidad deben aparecer inmediatamente y no esperar su renovación.
+  const [dailySnapshot, activeUserPlaces] = await Promise.all([
+    readDiscoveryCacheByKey(locationDailySnapshotKey),
+    discoverFromPreloadedPlaces(location, key || undefined, 'user_submission'),
+  ])
   const t1 = Date.now()
   if (dailySnapshot && Array.isArray(dailySnapshot.payload) && dailySnapshot.payload.length > 0) {
-    const base = dailySnapshot.payload as DiscoverItem[]
+    const snapshotItems = dailySnapshot.payload as DiscoverItem[]
+    // Reemplazar también el registro del snapshot si ya existía: así se ven al
+    // instante nuevas reseñas, coordenadas o cambios de una picada comunitaria.
+    const byId = new Map(snapshotItems.map(item => [item.id, item]))
+    for (const place of activeUserPlaces) byId.set(place.id, place)
+    const base = [...byId.values()]
     const withTags = await enrichDiscoverTags(base)
     const t2 = Date.now()
     const scored = withTags.map(item => {
@@ -1333,4 +1342,3 @@ export async function GET(req: Request) {
     },
   })
 }
-

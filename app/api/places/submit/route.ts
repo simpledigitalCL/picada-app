@@ -105,6 +105,8 @@ export async function POST(req: Request) {
         place_id:   placeId,
         type:       'review',
         content:    reviewComment || '',
+        rating:     reviewRating,
+        mood_tags:  reviewMoods,
         nutrition_data: {
           review: {
             comment: reviewComment,

@@ -181,9 +181,13 @@ export async function persistUnifiedContent(supabase: SupabaseClient, body: Unif
   const mediaUrl = mediaList[0]?.url || null
   const mediaKind = mediaList[0]?.kind || null
   const isIncognito = Boolean(body.review?.isIncognito)
-  const contentType = normalizeCategory(
-    mediaKind === 'video' ? 'video' : mediaUrl ? 'photo' : isIncognito ? 'incognito' : 'review',
-  )
+  // Una foto o video es un adjunto. Si el aporte incluye una nota o comentario,
+  // sigue siendo una reseña para el feed y para el cálculo de reputación.
+  const contentType = isIncognito
+    ? 'incognito'
+    : (rating !== null || Boolean(comment)
+      ? 'review'
+      : normalizeCategory(mediaKind === 'video' ? 'video' : mediaUrl ? 'photo' : 'review'))
   const entryType = body.entry
   const normalizedCategory = computed.normalizedCategory
   const normalizedTags = computed.normalizedTags
@@ -366,4 +370,3 @@ export async function persistUnifiedContent(supabase: SupabaseClient, body: Unif
     backgroundTasks,
   }
 }
-

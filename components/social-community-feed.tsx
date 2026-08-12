@@ -240,20 +240,28 @@ function PostCard({
 
   const handleOpenPlace = () => {
     if (!placeName || !onSelectPlace) return
+    const resolvedPlaceId = !isLocal ? (post as SocialPost).place_id : null
+    const remotePlace = !isLocal ? (post as SocialPost) : null
     onSelectPlace({
-      id: post.id,
+      // La publicación no es el local. Conservar el UUID del local permite que
+      // RestaurantDetail cargue la reseña comunitaria con su autor real.
+      id: resolvedPlaceId || post.id,
       name: placeName,
-      address: '',
+      address: remotePlace?.place_address || '',
       category: 'picada',
       description: safeContent,
-      comuna: '', lat: 0, lng: 0,
+      comuna: '',
+      lat: remotePlace?.place_lat || 0,
+      lng: remotePlace?.place_lng || 0,
       rating: rating || 0,
       reviewCount: 0, distance: '',
       priceRange: 1, tags: detailTags,
       imageUrl: mediaUrl || '',
       starPlate: 'none' as any, openNow: false,
-      reviewsText: safeContent ? [safeContent] : [],
-      mapsUrl: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(placeName)}`,
+      // reviewsText es exclusivamente un fallback externo (Google/OSM); no
+      // convertir contenido de la comunidad en una falsa reseña de Google.
+      reviewsText: [],
+      mapsUrl: remotePlace?.place_maps_url || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(placeName)}`,
     })
   }
 
